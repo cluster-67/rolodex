@@ -1,0 +1,11 @@
+Checks: >
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  openmp-*,
+  mpi-*
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+FormatStyle: none

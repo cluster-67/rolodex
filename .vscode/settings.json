@@ -2,5 +2,6 @@
     "[cpp]": {
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
-    }
+    },
+    "clangd.arguments": ["--clang-tidy"]
 }
