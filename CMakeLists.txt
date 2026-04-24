@@ -24,6 +24,7 @@ add_executable(knn
     src/kmeans.cpp
     src/validation.cpp
     src/timing.cpp
+    src/validator.cpp
 )
 target_link_libraries(knn PRIVATE HDF5::HDF5)
 target_include_directories(knn PRIVATE

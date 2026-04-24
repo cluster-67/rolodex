@@ -1,7 +1,7 @@
 #include "rolodex/dataset.hpp"
 #include "rolodex/kmeans.hpp"
 #include "rolodex/timing.hpp"
-#include "rolodex/validation.hpp"
+#include "rolodex/validator.hpp"
 
 #include <iostream>
 
@@ -48,44 +48,15 @@ int main() {
         return 1;
     }
 
-    const std::vector<ValidationPoint> &validation_points = dataset.get_validation_points();
-    if (validation_points.empty()) {
-        std::cerr << "No validation points loaded\n";
+    const Validator validator(
+        dataset, knn_algorithm,
+        ValidatorConfig{kRunConfig.top_k, kRunConfig.nprobe, kRunConfig.vector_match_eps});
+    try {
+        (void)validator.run(std::cout, std::cerr);
+    } catch (const std::exception &e) {
+        std::cerr << "Validation failed: " << e.what() << '\n';
         return 1;
     }
-
-    rolodex::timing::QueryLatencyAccumulator query_latency;
-    float recall_sum = 0.0f;
-
-    for (std::size_t qi = 0; qi < validation_points.size(); ++qi) {
-        const ValidationPoint &vp = validation_points[qi];
-
-        const auto q_start = rolodex::timing::SteadyClock::now();
-        const QueryResult predicted =
-            knn_algorithm.query_clusters(vp.query, kRunConfig.top_k, kRunConfig.nprobe);
-        const auto q_end = rolodex::timing::SteadyClock::now();
-        const double q_ms = rolodex::timing::millis_between(q_start, q_end);
-
-        query_latency.add_sample(q_ms);
-
-        const float recall = rolodex::validation::recall_at_k(vp, predicted, kRunConfig.top_k,
-                                                              kRunConfig.vector_match_eps);
-        recall_sum += recall;
-
-        std::cout << "query=" << qi << " recall@" << kRunConfig.top_k << "=" << recall
-                  << " query_time_ms=" << q_ms << '\n';
-
-        if (recall < 1.0f - 1e-6f) {
-            std::cerr << "query=" << qi << " recall below 1.0; diagnostics:\n";
-            rolodex::validation::print_miss_diagnostics(vp, predicted, kRunConfig.top_k,
-                                                        kRunConfig.vector_match_eps, std::cerr);
-        }
-    }
-
-    const double n = static_cast<double>(validation_points.size());
-    std::cout << "aggregate: mean_recall@" << kRunConfig.top_k << "="
-              << (recall_sum / static_cast<float>(n)) << '\n';
-    query_latency.print_aggregate(std::cout);
 
     return 0;
 }
