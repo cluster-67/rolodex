@@ -3,8 +3,13 @@
 #include "rolodex/distance.hpp"
 
 #include <algorithm>
+#include <cerrno>
+#include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <sys/stat.h>
 #include <utility>
 
 KNNAlgorithm::KNNAlgorithm(Dataset *dataset, int num_clusters)
@@ -19,6 +24,14 @@ SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters)
 void SerialKNNAlgorithm::create_clusters(int update_frequency) {
     (void)update_frequency;
     std::vector<TVector> &points = dataset_->get_points();
+    if (points.empty() || num_clusters_ <= 0) {
+        return;
+    }
+
+    if (load_clusters_from_cache()) {
+        std::cout << "Loaded cluster cache from " << get_cache_path() << '\n';
+        return;
+    }
 
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
         const int point_idx = static_cast<int>(rand() % points.size());
@@ -47,6 +60,8 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
 
         update_centroids();
     }
+
+    save_clusters_to_cache();
 }
 
 void SerialKNNAlgorithm::update_centroids() {
@@ -163,4 +178,130 @@ std::vector<int> SerialKNNAlgorithm::find_nearest_points(int centroid_idx, int t
         }
     }
     return nearest_points_indices;
+}
+
+std::string SerialKNNAlgorithm::get_cache_path() const {
+    const std::vector<TVector> &points = dataset_->get_points();
+    const std::size_t num_points = points.size();
+    const std::size_t dim = points.empty() ? 0 : points[0].size();
+
+    std::ostringstream out;
+    out << kClusterCacheDir << "/cluster_cache_k" << num_clusters_ << "_n" << num_points << "_d"
+        << dim << ".bin";
+    return out.str();
+}
+
+bool SerialKNNAlgorithm::load_clusters_from_cache() {
+    const std::vector<TVector> &points = dataset_->get_points();
+    if (points.empty() || num_clusters_ <= 0) {
+        return false;
+    }
+
+    const std::size_t num_points = points.size();
+    const std::size_t dim = points[0].size();
+
+    std::ifstream in(get_cache_path().c_str(), std::ios::binary);
+    if (!in) {
+        return false;
+    }
+
+    uint32_t magic = 0;
+    uint32_t version = 0;
+    int32_t cached_num_clusters = 0;
+    uint64_t cached_num_points = 0;
+    uint64_t cached_dim = 0;
+
+    in.read(reinterpret_cast<char *>(&magic), sizeof(magic));
+    in.read(reinterpret_cast<char *>(&version), sizeof(version));
+    in.read(reinterpret_cast<char *>(&cached_num_clusters), sizeof(cached_num_clusters));
+    in.read(reinterpret_cast<char *>(&cached_num_points), sizeof(cached_num_points));
+    in.read(reinterpret_cast<char *>(&cached_dim), sizeof(cached_dim));
+    if (!in.good()) {
+        return false;
+    }
+
+    const uint32_t kMagic = 0x4B4D4348; // "KMCH"
+    const uint32_t kVersion = 1;
+    if (magic != kMagic || version != kVersion ||
+        cached_num_clusters != static_cast<int32_t>(num_clusters_) ||
+        cached_num_points != static_cast<uint64_t>(num_points) ||
+        cached_dim != static_cast<uint64_t>(dim)) {
+        return false;
+    }
+
+    centroids_.assign(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f));
+    membership_.assign(num_points, -1);
+
+    for (int c = 0; c < num_clusters_; ++c) {
+        in.read(reinterpret_cast<char *>(centroids_[static_cast<std::size_t>(c)].data()),
+                static_cast<std::streamsize>(dim * sizeof(float)));
+        if (!in.good()) {
+            return false;
+        }
+    }
+
+    in.read(reinterpret_cast<char *>(membership_.data()),
+            static_cast<std::streamsize>(num_points * sizeof(int)));
+    if (!in.good()) {
+        return false;
+    }
+
+    for (int m : membership_) {
+        if (m < 0 || m >= num_clusters_) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void SerialKNNAlgorithm::save_clusters_to_cache() const {
+    const std::vector<TVector> &points = dataset_->get_points();
+    if (points.empty() || num_clusters_ <= 0) {
+        return;
+    }
+    const std::size_t num_points = points.size();
+    const std::size_t dim = points[0].size();
+
+    struct stat st;
+    if (stat(kClusterCacheDir, &st) != 0) {
+        if (mkdir(kClusterCacheDir, 0775) != 0) {
+            std::cerr << "Warning: failed to create cluster cache dir '" << kClusterCacheDir
+                      << "': errno=" << errno << '\n';
+            return;
+        }
+    }
+
+    std::ofstream out(get_cache_path().c_str(), std::ios::binary);
+    if (!out) {
+        std::cerr << "Warning: failed to open cluster cache file for write: " << get_cache_path()
+                  << '\n';
+        return;
+    }
+
+    const uint32_t kMagic = 0x4B4D4348; // "KMCH"
+    const uint32_t kVersion = 1;
+    const int32_t saved_num_clusters = static_cast<int32_t>(num_clusters_);
+    const uint64_t saved_num_points = static_cast<uint64_t>(num_points);
+    const uint64_t saved_dim = static_cast<uint64_t>(dim);
+
+    out.write(reinterpret_cast<const char *>(&kMagic), sizeof(kMagic));
+    out.write(reinterpret_cast<const char *>(&kVersion), sizeof(kVersion));
+    out.write(reinterpret_cast<const char *>(&saved_num_clusters), sizeof(saved_num_clusters));
+    out.write(reinterpret_cast<const char *>(&saved_num_points), sizeof(saved_num_points));
+    out.write(reinterpret_cast<const char *>(&saved_dim), sizeof(saved_dim));
+
+    for (int c = 0; c < num_clusters_; ++c) {
+        out.write(reinterpret_cast<const char *>(centroids_[static_cast<std::size_t>(c)].data()),
+                  static_cast<std::streamsize>(dim * sizeof(float)));
+    }
+    out.write(reinterpret_cast<const char *>(membership_.data()),
+              static_cast<std::streamsize>(num_points * sizeof(int)));
+
+    if (!out.good()) {
+        std::cerr << "Warning: failed while writing cluster cache file: " << get_cache_path()
+                  << '\n';
+        return;
+    }
+    std::cout << "Saved cluster cache to " << get_cache_path() << '\n';
 }

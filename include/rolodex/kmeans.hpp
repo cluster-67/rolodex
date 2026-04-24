@@ -4,6 +4,7 @@
 #include "rolodex/query_result.hpp"
 #include "rolodex/types.hpp"
 
+#include <string>
 #include <vector>
 
 class KNNAlgorithm {
@@ -35,8 +36,12 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 
   private:
+    static constexpr const char *kClusterCacheDir = "data/cluster_cache";
     std::vector<TVector> centroids_;
     std::vector<int> membership_;
+    std::string get_cache_path() const;
+    bool load_clusters_from_cache();
+    void save_clusters_to_cache() const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 };
 
