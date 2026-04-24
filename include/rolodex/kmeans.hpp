@@ -15,21 +15,24 @@ class KNNAlgorithm {
     KNNAlgorithm(Dataset *dataset, int num_clusters);
 
     virtual ~KNNAlgorithm() = default;
+
+    /** Serial ignores `update_frequency`; OpenMP uses it for centroid update cadence. */
+    virtual void create_clusters(int update_frequency = 1) = 0;
+
+    virtual QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const = 0;
 };
 
 class SerialKNNAlgorithm : public KNNAlgorithm {
   public:
     SerialKNNAlgorithm(Dataset *dataset, int num_clusters);
 
-    void create_clusters();
+    void create_clusters(int update_frequency = 1) override;
 
     void update_centroids();
 
     int find_nearest_centroid(const TVector &point) const;
 
-    /** Approximate kNN: search points in the `nprobe` nearest centroids, return `top_k` closest by
-     * squared L2. */
-    QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const;
+    QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 
   private:
     std::vector<TVector> centroids_;
@@ -38,20 +41,19 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
 };
 
 class OpenMPKNNAlgorithm : public KNNAlgorithm {
+  public:
+    OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters);
+
+    void create_clusters(int update_frequency = 1) override;
+
+    void update_centroids();
+
+    QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
+
   private:
     std::vector<TVector> centroids_;
     std::vector<int> membership_;
 
-  public:
-    OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters);
-
-    void create_clusters(int update_frequency);
-
-    void update_centroids();
-
-    int find_nearest_centroid(TVector &point);
-
-    std::vector<TVector> query_clusters(TVector &query, int top_k);
-
-    std::vector<int> find_nearest_points(int centroid_idx, int top_k);
+    int find_nearest_centroid(const TVector &point) const;
+    std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 };

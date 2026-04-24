@@ -19,12 +19,12 @@ struct ValidationSummary {
 
 class Validator {
   public:
-    Validator(const Dataset &dataset, const SerialKNNAlgorithm &algorithm, ValidatorConfig config);
+    Validator(const Dataset &dataset, const KNNAlgorithm &algorithm, ValidatorConfig config);
 
     ValidationSummary run(std::ostream &out, std::ostream &err) const;
 
   private:
     const Dataset &dataset_;
-    const SerialKNNAlgorithm &algorithm_;
+    const KNNAlgorithm &algorithm_;
     ValidatorConfig config_;
 };

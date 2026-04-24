@@ -22,24 +22,22 @@ add_executable(knn
     src/knn_main.cpp
     src/dataset.cpp
     src/kmeans.cpp
+    src/kmeans_openmp.cpp
     src/validation.cpp
     src/timing.cpp
     src/validator.cpp
 )
-target_link_libraries(knn PRIVATE HDF5::HDF5)
+target_link_libraries(knn PRIVATE HDF5::HDF5 OpenMP::OpenMP_CXX)
 target_include_directories(knn PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${HDF5_INCLUDE_DIRS}
 )
 
-add_executable(knn_openmp
-    src/knn_openmp_main.cpp
-    src/dataset.cpp
-    src/kmeans.cpp
-    src/kmeans_openmp.cpp
-)
-target_link_libraries(knn_openmp PRIVATE HDF5::HDF5 OpenMP::OpenMP_CXX)
-target_include_directories(knn_openmp PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${HDF5_INCLUDE_DIRS}
-)
+# add_executable(serial main.cpp serial.cpp common.h)
+
+# add_executable(openmp main.cpp openmp.cpp common.h)
+# target_link_libraries(openmp PRIVATE OpenMP::OpenMP_CXX)
+
+# Copy the job scripts
+# configure_file(job-serial job-serial COPYONLY)
+# configure_file(job-openmp job-openmp COPYONLY)

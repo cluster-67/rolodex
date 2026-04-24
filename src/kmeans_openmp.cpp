@@ -2,9 +2,10 @@
 
 #include "rolodex/distance.hpp"
 
-#include <omp.h>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <omp.h>
 
 OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters)
     : KNNAlgorithm(dataset, num_clusters) {
@@ -31,10 +32,7 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
         iters++;
         int membership_change_count = 0;
 
-        // Step 2: Each thread computes nearest centroid for its slice of points.
-        // No write conflict: each point_idx maps to exactly one membership_ slot,
-        // and the loop is partitioned so each slot is touched by exactly one thread.
-        #pragma omp parallel for schedule(static) reduction(+:membership_change_count)
+#pragma omp parallel for schedule(static) reduction(+ : membership_change_count)
         for (std::size_t point_idx = 0; point_idx < points.size(); point_idx++) {
             const int nearest = find_nearest_centroid(points[point_idx]);
             if (membership_[point_idx] != nearest) {
@@ -53,7 +51,6 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
             break;
         }
 
-        // Steps 3-5: Parallel local accumulation then global reduce.
         if (iters % update_frequency == 0) {
             update_centroids();
         }
@@ -67,11 +64,8 @@ void OpenMPKNNAlgorithm::update_centroids() {
     }
 
     const std::size_t dim = points[0].size();
-    // Size to max possible threads so the parallel region below can freely use
-    // any thread id without bounds issues.
     const int max_threads = omp_get_max_threads();
 
-    // Step 3: Per-thread local accumulators — no shared writes, no locking needed.
     std::vector<std::vector<TVector>> local_sums(
         static_cast<std::size_t>(max_threads),
         std::vector<TVector>(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f)));
@@ -79,10 +73,10 @@ void OpenMPKNNAlgorithm::update_centroids() {
         static_cast<std::size_t>(max_threads),
         std::vector<float>(static_cast<std::size_t>(num_clusters_), 0.0f));
 
-    #pragma omp parallel
+#pragma omp parallel
     {
         const int tid = omp_get_thread_num();
-        #pragma omp for schedule(static)
+#pragma omp for schedule(static)
         for (std::size_t point_idx = 0; point_idx < points.size(); point_idx++) {
             const std::size_t c = static_cast<std::size_t>(membership_[point_idx]);
             for (std::size_t i = 0; i < dim; i++) {
@@ -92,7 +86,6 @@ void OpenMPKNNAlgorithm::update_centroids() {
         }
     }
 
-    // Steps 4-5: Reduce all thread-local sums/counts into the global centroid.
     for (std::size_t c = 0; c < static_cast<std::size_t>(num_clusters_); c++) {
         TVector global_sum(dim, 0.0f);
         float global_count = 0.0f;
@@ -113,7 +106,7 @@ void OpenMPKNNAlgorithm::update_centroids() {
     }
 }
 
-int OpenMPKNNAlgorithm::find_nearest_centroid(TVector &point) {
+int OpenMPKNNAlgorithm::find_nearest_centroid(const TVector &point) const {
     int nearest_centroid_idx = 0;
     float nearest_sq = squared_l2(point, centroids_[0]);
     for (int c_idx = 1; c_idx < num_clusters_; c_idx++) {
@@ -126,20 +119,67 @@ int OpenMPKNNAlgorithm::find_nearest_centroid(TVector &point) {
     return nearest_centroid_idx;
 }
 
-std::vector<TVector> OpenMPKNNAlgorithm::query_clusters(TVector &query, int top_k) {
-    (void)top_k;
-    const int nearest_centroid_idx = find_nearest_centroid(query);
-    std::vector<int> nearest_points_indices = find_nearest_points(nearest_centroid_idx, top_k);
-    std::vector<TVector> nearest_points;
-    nearest_points.reserve(nearest_points_indices.size());
-    std::vector<TVector> &pts = dataset_->get_points();
-    for (int idx : nearest_points_indices) {
-        nearest_points.push_back(pts[static_cast<std::size_t>(idx)]);
+QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, int nprobe) const {
+    const std::vector<TVector> &pts = dataset_->get_points();
+    if (pts.empty() || top_k <= 0 || num_clusters_ <= 0) {
+        return QueryResult{};
     }
-    return nearest_points;
+
+    const int nprobe_clamped = std::max(1, std::min(nprobe, num_clusters_));
+
+    std::vector<std::pair<float, int>> centroid_dists;
+    centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
+    for (int c = 0; c < num_clusters_; ++c) {
+        centroid_dists.emplace_back(squared_l2(query, centroids_[static_cast<std::size_t>(c)]), c);
+    }
+    std::sort(centroid_dists.begin(), centroid_dists.end(),
+              [](const std::pair<float, int> &a, const std::pair<float, int> &b) {
+                  if (a.first != b.first) {
+                      return a.first < b.first;
+                  }
+                  return a.second < b.second;
+              });
+
+    std::vector<std::size_t> candidate_indices;
+    for (int p = 0; p < nprobe_clamped; ++p) {
+        const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
+        const std::vector<int> from_cluster = find_nearest_points(centroid_idx, top_k);
+        for (int idx : from_cluster) {
+            candidate_indices.push_back(static_cast<std::size_t>(idx));
+        }
+    }
+
+    if (candidate_indices.empty()) {
+        return QueryResult{};
+    }
+
+    std::vector<std::pair<float, std::size_t>> scored;
+    scored.reserve(candidate_indices.size());
+    for (std::size_t idx : candidate_indices) {
+        scored.emplace_back(squared_l2(query, pts[idx]), idx);
+    }
+
+    const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
+    std::partial_sort(
+        scored.begin(), scored.begin() + static_cast<long>(k_out), scored.end(),
+        [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
+            if (a.first != b.first) {
+                return a.first < b.first;
+            }
+            return a.second < b.second;
+        });
+
+    QueryResult result;
+    result.neighbors.reserve(k_out);
+    result.distances.reserve(k_out);
+    for (std::size_t i = 0; i < k_out; ++i) {
+        result.neighbors.push_back(pts[scored[i].second]);
+        result.distances.push_back(scored[i].first);
+    }
+    return result;
 }
 
-std::vector<int> OpenMPKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) {
+std::vector<int> OpenMPKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) const {
     (void)top_k;
     std::vector<int> nearest_points_indices;
     const std::vector<TVector> &pts = dataset_->get_points();

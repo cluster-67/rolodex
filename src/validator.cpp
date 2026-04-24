@@ -5,8 +5,7 @@
 
 #include <stdexcept>
 
-Validator::Validator(const Dataset &dataset, const SerialKNNAlgorithm &algorithm,
-                     ValidatorConfig config)
+Validator::Validator(const Dataset &dataset, const KNNAlgorithm &algorithm, ValidatorConfig config)
     : dataset_(dataset), algorithm_(algorithm), config_(config) {}
 
 ValidationSummary Validator::run(std::ostream &out, std::ostream &err) const {

@@ -16,7 +16,8 @@ SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters)
     membership_.resize(dataset_->get_points().size(), -1);
 }
 
-void SerialKNNAlgorithm::create_clusters() {
+void SerialKNNAlgorithm::create_clusters(int update_frequency) {
+    (void)update_frequency;
     std::vector<TVector> &points = dataset_->get_points();
 
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
