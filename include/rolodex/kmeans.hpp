@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rolodex/dataset.hpp"
+#include "rolodex/query_result.hpp"
 #include "rolodex/types.hpp"
 
 #include <vector>
@@ -28,7 +29,7 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
 
     /** Approximate kNN: search points in the `nprobe` nearest centroids, return `top_k` closest by
      * squared L2. */
-    std::vector<TVector> query_clusters(const TVector &query, int top_k, int nprobe) const;
+    QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const;
 
   private:
     std::vector<TVector> centroids_;

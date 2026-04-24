@@ -92,11 +92,10 @@ int SerialKNNAlgorithm::find_nearest_centroid(const TVector &point) const {
     return nearest_centroid_idx;
 }
 
-std::vector<TVector> SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k,
-                                                        int nprobe) const {
+QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, int nprobe) const {
     const std::vector<TVector> &pts = dataset_->get_points();
     if (pts.empty() || top_k <= 0 || num_clusters_ <= 0) {
-        return {};
+        return QueryResult{};
     }
 
     const int nprobe_clamped = std::max(1, std::min(nprobe, num_clusters_));
@@ -124,7 +123,7 @@ std::vector<TVector> SerialKNNAlgorithm::query_clusters(const TVector &query, in
     }
 
     if (candidate_indices.empty()) {
-        return {};
+        return QueryResult{};
     }
 
     std::vector<std::pair<float, std::size_t>> scored;
@@ -143,10 +142,12 @@ std::vector<TVector> SerialKNNAlgorithm::query_clusters(const TVector &query, in
             return a.second < b.second;
         });
 
-    std::vector<TVector> result;
-    result.reserve(k_out);
+    QueryResult result;
+    result.neighbors.reserve(k_out);
+    result.distances.reserve(k_out);
     for (std::size_t i = 0; i < k_out; ++i) {
-        result.push_back(pts[scored[i].second]);
+        result.neighbors.push_back(pts[scored[i].second]);
+        result.distances.push_back(scored[i].first);
     }
     return result;
 }

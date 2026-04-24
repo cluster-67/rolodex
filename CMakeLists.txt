@@ -22,6 +22,8 @@ add_executable(knn
     src/knn_main.cpp
     src/dataset.cpp
     src/kmeans.cpp
+    src/validation.cpp
+    src/timing.cpp
 )
 target_link_libraries(knn PRIVATE HDF5::HDF5)
 target_include_directories(knn PRIVATE
