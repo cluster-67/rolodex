@@ -69,8 +69,8 @@ void SerialKNNAlgorithm::update_centroids() {
         if (count <= 0.0f) {
             continue;
         }
-        for (std::size_t i = 0; i < centroid_sums[static_cast<std::size_t>(c_idx)].size(); i++) {
-            centroid_sums[static_cast<std::size_t>(c_idx)][i] /= count;
+        for (float &i : centroid_sums[static_cast<std::size_t>(c_idx)]) {
+            i /= count;
         }
         centroids_[static_cast<std::size_t>(c_idx)] =
             centroid_sums[static_cast<std::size_t>(c_idx)];
