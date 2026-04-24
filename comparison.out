@@ -1,0 +1,181 @@
+=== SERIAL ===
+Loaded /train into points with shape 60000x784
+Iteration 1 with 59990 membership changes
+Iteration 2 with 17419 membership changes
+Iteration 3 with 4825 membership changes
+Iteration 4 with 2786 membership changes
+Iteration 5 with 1813 membership changes
+Iteration 6 with 1352 membership changes
+Iteration 7 with 1143 membership changes
+Iteration 8 with 1014 membership changes
+Iteration 9 with 998 membership changes
+Iteration 10 with 1028 membership changes
+Iteration 11 with 1033 membership changes
+Iteration 12 with 1158 membership changes
+Iteration 13 with 1234 membership changes
+Iteration 14 with 1343 membership changes
+Iteration 15 with 1277 membership changes
+Iteration 16 with 1134 membership changes
+Iteration 17 with 1005 membership changes
+Iteration 18 with 874 membership changes
+Iteration 19 with 728 membership changes
+Iteration 20 with 690 membership changes
+Iteration 21 with 591 membership changes
+Iteration 22 with 509 membership changes
+Iteration 23 with 507 membership changes
+Iteration 24 with 562 membership changes
+Iteration 25 with 713 membership changes
+Iteration 26 with 990 membership changes
+Iteration 27 with 1522 membership changes
+Iteration 28 with 2062 membership changes
+Iteration 29 with 1943 membership changes
+Iteration 30 with 1370 membership changes
+Iteration 31 with 876 membership changes
+Iteration 32 with 518 membership changes
+Iteration 33 with 373 membership changes
+Iteration 34 with 278 membership changes
+Iteration 35 with 205 membership changes
+Iteration 36 with 160 membership changes
+Iteration 37 with 138 membership changes
+Iteration 38 with 117 membership changes
+Iteration 39 with 94 membership changes
+Iteration 40 with 81 membership changes
+Iteration 41 with 67 membership changes
+Iteration 42 with 62 membership changes
+Iteration 43 with 42 membership changes
+Iteration 44 with 37 membership changes
+Iteration 45 with 27 membership changes
+Iteration 46 with 26 membership changes
+Iteration 47 with 24 membership changes
+Iteration 48 with 18 membership changes
+Iteration 49 with 12 membership changes
+Iteration 50 with 10 membership changes
+Iteration 51 with 13 membership changes
+Iteration 52 with 12 membership changes
+Iteration 53 with 6 membership changes
+Iteration 54 with 11 membership changes
+Iteration 55 with 7 membership changes
+Iteration 56 with 7 membership changes
+Iteration 57 with 10 membership changes
+Iteration 58 with 5 membership changes
+Iteration 59 with 2 membership changes
+Iteration 60 with 0 membership changes
+
+real	0m27.629s
+user	0m26.841s
+sys	0m0.711s
+
+=== OPENMP 2 threads ===
+Loaded /train into points with shape 60000x784
+Iteration 1 with 59990 membership changes
+Iteration 2 with 11852 membership changes
+Iteration 3 with 5104 membership changes
+Iteration 4 with 3122 membership changes
+Iteration 5 with 1666 membership changes
+Iteration 6 with 991 membership changes
+Iteration 7 with 625 membership changes
+Iteration 8 with 448 membership changes
+Iteration 9 with 381 membership changes
+Iteration 10 with 299 membership changes
+Iteration 11 with 248 membership changes
+Iteration 12 with 257 membership changes
+Iteration 13 with 240 membership changes
+Iteration 14 with 243 membership changes
+Iteration 15 with 247 membership changes
+Iteration 16 with 306 membership changes
+Iteration 17 with 346 membership changes
+Iteration 18 with 376 membership changes
+Iteration 19 with 385 membership changes
+Iteration 20 with 381 membership changes
+Iteration 21 with 345 membership changes
+Iteration 22 with 346 membership changes
+Iteration 23 with 357 membership changes
+Iteration 24 with 369 membership changes
+Iteration 25 with 377 membership changes
+Iteration 26 with 340 membership changes
+Iteration 27 with 325 membership changes
+Iteration 28 with 302 membership changes
+Iteration 29 with 278 membership changes
+Iteration 30 with 251 membership changes
+Iteration 31 with 209 membership changes
+Iteration 32 with 173 membership changes
+Iteration 33 with 153 membership changes
+Iteration 34 with 139 membership changes
+Iteration 35 with 131 membership changes
+Iteration 36 with 108 membership changes
+Iteration 37 with 77 membership changes
+Iteration 38 with 76 membership changes
+Iteration 39 with 62 membership changes
+Iteration 40 with 56 membership changes
+
+real	0m9.936s
+user	0m18.090s
+sys	0m0.947s
+
+=== OPENMP 4 threads ===
+Loaded /train into points with shape 60000x784
+Iteration 1 with 59990 membership changes
+Iteration 2 with 14350 membership changes
+Iteration 3 with 6266 membership changes
+Iteration 4 with 3752 membership changes
+Iteration 5 with 2259 membership changes
+Iteration 6 with 1547 membership changes
+Iteration 7 with 1180 membership changes
+Iteration 8 with 904 membership changes
+Iteration 9 with 761 membership changes
+Iteration 10 with 569 membership changes
+Iteration 11 with 421 membership changes
+Iteration 12 with 340 membership changes
+Iteration 13 with 276 membership changes
+Iteration 14 with 249 membership changes
+Iteration 15 with 238 membership changes
+Iteration 16 with 290 membership changes
+Iteration 17 with 356 membership changes
+Iteration 18 with 423 membership changes
+Iteration 19 with 560 membership changes
+Iteration 20 with 753 membership changes
+Iteration 21 with 841 membership changes
+Iteration 22 with 736 membership changes
+Iteration 23 with 516 membership changes
+Iteration 24 with 324 membership changes
+Iteration 25 with 195 membership changes
+Iteration 26 with 131 membership changes
+Iteration 27 with 89 membership changes
+Iteration 28 with 63 membership changes
+Iteration 29 with 45 membership changes
+
+real	0m3.986s
+user	0m13.475s
+sys	0m0.794s
+
+=== OPENMP 8 threads ===
+Loaded /train into points with shape 60000x784
+Iteration 1 with 59990 membership changes
+Iteration 2 with 9958 membership changes
+Iteration 3 with 6147 membership changes
+Iteration 4 with 5019 membership changes
+Iteration 5 with 3205 membership changes
+Iteration 6 with 1862 membership changes
+Iteration 7 with 1095 membership changes
+Iteration 8 with 697 membership changes
+Iteration 9 with 488 membership changes
+Iteration 10 with 388 membership changes
+Iteration 11 with 304 membership changes
+Iteration 12 with 275 membership changes
+Iteration 13 with 300 membership changes
+Iteration 14 with 335 membership changes
+Iteration 15 with 416 membership changes
+Iteration 16 with 529 membership changes
+Iteration 17 with 685 membership changes
+Iteration 18 with 804 membership changes
+Iteration 19 with 689 membership changes
+Iteration 20 with 504 membership changes
+Iteration 21 with 303 membership changes
+Iteration 22 with 185 membership changes
+Iteration 23 with 117 membership changes
+Iteration 24 with 71 membership changes
+Iteration 25 with 54 membership changes
+
+real	0m2.182s
+user	0m11.865s
+sys	0m0.849s

@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
     Dataset dataset(dataset_file);
     dataset.load_dataset();
 
-    SerialKNNAlgorithm knn_algorithm(&dataset, 10);
+    OpenMPKNNAlgorithm knn_algorithm(&dataset, 10);
     knn_algorithm.create_clusters();
 
     return 0;
