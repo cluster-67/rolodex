@@ -43,7 +43,7 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
   public:
     OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters);
 
-    void create_clusters();
+    void create_clusters(int update_frequency);
 
     void update_centroids();
 

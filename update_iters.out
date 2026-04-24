@@ -1,0 +1,37 @@
+=== SERIAL ===
+threads=1  update_freq=N/A  real=0m33.258s
+
+=== OPENMP ===
+threads=2  update_freq=1  real=0m10.231s
+threads=2  update_freq=3  real=0m0.769s
+threads=2  update_freq=5  real=0m0.776s
+threads=2  update_freq=7  real=0m0.763s
+threads=2  update_freq=9  real=0m0.773s
+threads=2  update_freq=11  real=0m0.764s
+threads=2  update_freq=13  real=0m0.773s
+threads=2  update_freq=15  real=0m0.768s
+threads=2  update_freq=17  real=0m0.940s
+threads=2  update_freq=19  real=0m0.773s
+
+threads=4  update_freq=1  real=0m3.022s
+threads=4  update_freq=3  real=0m0.537s
+threads=4  update_freq=5  real=0m0.565s
+threads=4  update_freq=7  real=0m0.549s
+threads=4  update_freq=9  real=0m0.544s
+threads=4  update_freq=11  real=0m0.568s
+threads=4  update_freq=13  real=0m0.544s
+threads=4  update_freq=15  real=0m0.547s
+threads=4  update_freq=17  real=0m0.553s
+threads=4  update_freq=19  real=0m0.558s
+
+threads=8  update_freq=1  real=0m1.924s
+threads=8  update_freq=3  real=0m0.434s
+threads=8  update_freq=5  real=0m0.433s
+threads=8  update_freq=7  real=0m0.454s
+threads=8  update_freq=9  real=0m0.453s
+threads=8  update_freq=11  real=0m0.447s
+threads=8  update_freq=13  real=0m0.453s
+threads=8  update_freq=15  real=0m0.464s
+threads=8  update_freq=17  real=0m0.436s
+threads=8  update_freq=19  real=0m0.431s
+

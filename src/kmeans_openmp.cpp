@@ -12,7 +12,7 @@ OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters)
     membership_.resize(dataset_->get_points().size(), -1);
 }
 
-void OpenMPKNNAlgorithm::create_clusters() {
+void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
     std::vector<TVector> &points = dataset_->get_points();
 
     // Step 1: Main thread randomly picks K initial centroids.
@@ -54,7 +54,9 @@ void OpenMPKNNAlgorithm::create_clusters() {
         }
 
         // Steps 3-5: Parallel local accumulation then global reduce.
-        update_centroids();
+        if (iters % update_frequency == 0) {
+            update_centroids();
+        }
     }
 }
 
