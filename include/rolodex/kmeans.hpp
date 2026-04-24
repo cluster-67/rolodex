@@ -17,10 +17,6 @@ class KNNAlgorithm {
 };
 
 class SerialKNNAlgorithm : public KNNAlgorithm {
-  private:
-    std::vector<TVector> centroids_;
-    std::vector<int> membership_;
-
   public:
     SerialKNNAlgorithm(Dataset *dataset, int num_clusters);
 
@@ -28,9 +24,14 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
 
     void update_centroids();
 
-    int find_nearest_centroid(TVector &point);
+    int find_nearest_centroid(const TVector &point) const;
 
-    std::vector<TVector> query_clusters(TVector &query, int top_k);
+    /** Approximate kNN: search points in the `nprobe` nearest centroids, return `top_k` closest by
+     * squared L2. */
+    std::vector<TVector> query_clusters(const TVector &query, int top_k, int nprobe) const;
 
-    std::vector<int> find_nearest_points(int centroid_idx, int top_k);
+  private:
+    std::vector<TVector> centroids_;
+    std::vector<int> membership_;
+    std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 };

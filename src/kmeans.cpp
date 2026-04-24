@@ -2,8 +2,10 @@
 
 #include "rolodex/distance.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <utility>
 
 KNNAlgorithm::KNNAlgorithm(Dataset *dataset, int num_clusters)
     : dataset_(dataset), num_clusters_(num_clusters) {}
@@ -77,7 +79,7 @@ void SerialKNNAlgorithm::update_centroids() {
     }
 }
 
-int SerialKNNAlgorithm::find_nearest_centroid(TVector &point) {
+int SerialKNNAlgorithm::find_nearest_centroid(const TVector &point) const {
     int nearest_centroid_idx = 0;
     float nearest_sq = squared_l2(point, centroids_[0]);
     for (int c_idx = 1; c_idx < num_clusters_; c_idx++) {
@@ -90,20 +92,66 @@ int SerialKNNAlgorithm::find_nearest_centroid(TVector &point) {
     return nearest_centroid_idx;
 }
 
-std::vector<TVector> SerialKNNAlgorithm::query_clusters(TVector &query, int top_k) {
-    (void)top_k;
-    int nearest_centroid_idx = find_nearest_centroid(query);
-    std::vector<int> nearest_points_indices = find_nearest_points(nearest_centroid_idx, top_k);
-    std::vector<TVector> nearest_points;
-    nearest_points.reserve(nearest_points_indices.size());
-    std::vector<TVector> &pts = dataset_->get_points();
-    for (int idx : nearest_points_indices) {
-        nearest_points.push_back(pts[static_cast<std::size_t>(idx)]);
+std::vector<TVector> SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k,
+                                                        int nprobe) const {
+    const std::vector<TVector> &pts = dataset_->get_points();
+    if (pts.empty() || top_k <= 0 || num_clusters_ <= 0) {
+        return {};
     }
-    return nearest_points;
+
+    const int nprobe_clamped = std::max(1, std::min(nprobe, num_clusters_));
+
+    std::vector<std::pair<float, int>> centroid_dists;
+    centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
+    for (int c = 0; c < num_clusters_; ++c) {
+        centroid_dists.emplace_back(squared_l2(query, centroids_[static_cast<std::size_t>(c)]), c);
+    }
+    std::sort(centroid_dists.begin(), centroid_dists.end(),
+              [](const std::pair<float, int> &a, const std::pair<float, int> &b) {
+                  if (a.first != b.first) {
+                      return a.first < b.first;
+                  }
+                  return a.second < b.second;
+              });
+
+    std::vector<std::size_t> candidate_indices;
+    for (int p = 0; p < nprobe_clamped; ++p) {
+        const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
+        const std::vector<int> from_cluster = find_nearest_points(centroid_idx, top_k);
+        for (int idx : from_cluster) {
+            candidate_indices.push_back(static_cast<std::size_t>(idx));
+        }
+    }
+
+    if (candidate_indices.empty()) {
+        return {};
+    }
+
+    std::vector<std::pair<float, std::size_t>> scored;
+    scored.reserve(candidate_indices.size());
+    for (std::size_t idx : candidate_indices) {
+        scored.emplace_back(squared_l2(query, pts[idx]), idx);
+    }
+
+    const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
+    std::partial_sort(
+        scored.begin(), scored.begin() + static_cast<long>(k_out), scored.end(),
+        [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
+            if (a.first != b.first) {
+                return a.first < b.first;
+            }
+            return a.second < b.second;
+        });
+
+    std::vector<TVector> result;
+    result.reserve(k_out);
+    for (std::size_t i = 0; i < k_out; ++i) {
+        result.push_back(pts[scored[i].second]);
+    }
+    return result;
 }
 
-std::vector<int> SerialKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) {
+std::vector<int> SerialKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) const {
     (void)top_k;
     std::vector<int> nearest_points_indices;
     const std::vector<TVector> &pts = dataset_->get_points();
