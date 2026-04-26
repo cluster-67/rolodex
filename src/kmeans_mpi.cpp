@@ -30,6 +30,21 @@ void MPIKMeans::create_clusters() {
     MPI_Bcast(&D, 1, MPI_INT, 0, MPI_COMM_WORLD);
     global_n_ = N;
 
+    // ── Step 2: rank 0 picks K random centroids from the full dataset ─────────
+    // Done before scatter so all N points are available for selection.
+    std::vector<float> centroid_flat(static_cast<std::size_t>(num_clusters_ * D), 0.0f);
+    if (rank_ == 0) {
+        srand(42);
+        for (int c = 0; c < num_clusters_; c++) {
+            const int idx = rand() % N;
+            for (int d = 0; d < D; d++) {
+                centroid_flat[static_cast<std::size_t>(c * D + d)] =
+                    flat_data[static_cast<std::size_t>(idx * D + d)];
+            }
+        }
+    }
+    MPI_Bcast(centroid_flat.data(), num_clusters_ * D, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
     // ── Compute per-rank slice sizes; handles N not divisible by size_ ────────
     std::vector<int> counts(static_cast<std::size_t>(size_));
     std::vector<int> displs(static_cast<std::size_t>(size_), 0);
@@ -54,20 +69,6 @@ void MPIKMeans::create_clusters() {
                 local_flat[static_cast<std::size_t>(i * D + d)];
         }
     }
-
-    // ── Step 2: rank 0 picks K random centroids and broadcasts them ───────────
-    std::vector<float> centroid_flat(static_cast<std::size_t>(num_clusters_ * D), 0.0f);
-    if (rank_ == 0) {
-        srand(42);
-        for (int c = 0; c < num_clusters_; c++) {
-            const int idx = rand() % local_n;
-            for (int d = 0; d < D; d++) {
-                centroid_flat[static_cast<std::size_t>(c * D + d)] =
-                    local_points_[static_cast<std::size_t>(idx)][static_cast<std::size_t>(d)];
-            }
-        }
-    }
-    MPI_Bcast(centroid_flat.data(), num_clusters_ * D, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
     centroids_.assign(static_cast<std::size_t>(num_clusters_), TVector(static_cast<std::size_t>(D)));
     for (int c = 0; c < num_clusters_; c++) {
