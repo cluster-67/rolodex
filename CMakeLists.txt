@@ -29,6 +29,7 @@ target_include_directories(knn PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${HDF5_INCLUDE_DIRS}
 )
+target_compile_options(knn PRIVATE -O3 -march=native -funroll-loops)
 
 add_executable(knn_openmp
     src/knn_openmp_main.cpp
