@@ -1,13 +1,16 @@
 #include "rolodex/kmeans.hpp"
 
+#include "rolodex/cache_utils.hpp"
 #include "rolodex/distance.hpp"
 
+#include <H5Cpp.h>
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
+#include <string>
+#include <sys/stat.h>
 #include <utility>
 
 SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters)
@@ -175,6 +178,54 @@ std::vector<int> SerialKNNAlgorithm::find_nearest_points(int centroid_idx, int t
     return nearest_points_indices;
 }
 
+namespace {
+
+const int32_t kCacheFormatVersion = 1;
+const char *kCacheAlgorithm = "serial";
+
+bool write_i32_attr(H5::H5Object &obj, const char *name, int32_t value) {
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, H5::PredType::STD_I32LE, scalar);
+    attr.write(H5::PredType::STD_I32LE, &value);
+    return true;
+}
+
+bool write_u64_attr(H5::H5Object &obj, const char *name, uint64_t value) {
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, H5::PredType::STD_U64LE, scalar);
+    attr.write(H5::PredType::STD_U64LE, &value);
+    return true;
+}
+
+bool write_str_attr(H5::H5Object &obj, const char *name, const std::string &value) {
+    H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, str_type, scalar);
+    attr.write(str_type, value);
+    return true;
+}
+
+bool read_i32_attr(const H5::H5Object &obj, const char *name, int32_t &out) {
+    H5::Attribute attr = obj.openAttribute(name);
+    attr.read(H5::PredType::NATIVE_INT32, &out);
+    return true;
+}
+
+bool read_u64_attr(const H5::H5Object &obj, const char *name, uint64_t &out) {
+    H5::Attribute attr = obj.openAttribute(name);
+    attr.read(H5::PredType::NATIVE_UINT64, &out);
+    return true;
+}
+
+bool read_str_attr(const H5::H5Object &obj, const char *name, std::string &out) {
+    H5::Attribute attr = obj.openAttribute(name);
+    H5::StrType str_type = attr.getStrType();
+    attr.read(str_type, out);
+    return true;
+}
+
+} // namespace
+
 std::string SerialKNNAlgorithm::get_cache_path() const {
     return build_cache_path("serial");
 }
@@ -187,60 +238,62 @@ bool SerialKNNAlgorithm::load_clusters_from_cache() {
 
     const std::size_t num_points = points.size();
     const std::size_t dim = points[0].size();
-    const uint64_t ds_sig_expected = dataset_signature();
+    const std::string expected_basename = cache_utils::dataset_basename(dataset_);
+    const std::string cache_path = get_cache_path();
 
-    std::ifstream in(get_cache_path().c_str(), std::ios::binary);
-    if (!in) {
+    struct stat st;
+    if (stat(cache_path.c_str(), &st) != 0) {
+        std::cout << "Could not load cluster cache (missing): " << cache_path << '\n';
         return false;
     }
 
-    uint32_t magic = 0;
-    uint32_t version = 0;
-    int32_t cached_num_clusters = 0;
-    uint64_t cached_num_points = 0;
-    uint64_t cached_dim = 0;
-    uint64_t cached_dataset_sig = 0;
+    try {
+        H5::H5File in(cache_path.c_str(), H5F_ACC_RDONLY);
 
-    in.read(reinterpret_cast<char *>(&magic), sizeof(magic));
-    in.read(reinterpret_cast<char *>(&version), sizeof(version));
-    in.read(reinterpret_cast<char *>(&cached_num_clusters), sizeof(cached_num_clusters));
-    in.read(reinterpret_cast<char *>(&cached_num_points), sizeof(cached_num_points));
-    in.read(reinterpret_cast<char *>(&cached_dim), sizeof(cached_dim));
-    in.read(reinterpret_cast<char *>(&cached_dataset_sig), sizeof(cached_dataset_sig));
-    if (!in.good()) {
-        return false;
-    }
+        int32_t format_version = 0;
+        int32_t cached_num_clusters = 0;
+        uint64_t cached_num_points = 0;
+        uint64_t cached_dim = 0;
+        std::string cached_algorithm;
+        std::string cached_dataset_basename;
 
-    const uint32_t kMagic = 0x4B4D4348; // "KMCH"
-    const uint32_t kVersion = 2;
-    if (magic != kMagic || version != kVersion ||
-        cached_num_clusters != static_cast<int32_t>(num_clusters_) ||
-        cached_num_points != static_cast<uint64_t>(num_points) ||
-        cached_dim != static_cast<uint64_t>(dim) ||
-        cached_dataset_sig != ds_sig_expected) {
-        return false;
-    }
+        read_i32_attr(in, "format_version", format_version);
+        read_str_attr(in, "algorithm", cached_algorithm);
+        read_i32_attr(in, "num_clusters", cached_num_clusters);
+        read_u64_attr(in, "num_points", cached_num_points);
+        read_u64_attr(in, "dim", cached_dim);
+        read_str_attr(in, "dataset_basename", cached_dataset_basename);
 
-    centroids_.assign(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f));
-    membership_.assign(num_points, -1);
-
-    for (int c = 0; c < num_clusters_; ++c) {
-        in.read(reinterpret_cast<char *>(centroids_[static_cast<std::size_t>(c)].data()),
-                static_cast<std::streamsize>(dim * sizeof(float)));
-        if (!in.good()) {
+        if (format_version != kCacheFormatVersion || cached_algorithm != kCacheAlgorithm ||
+            cached_num_clusters != static_cast<int32_t>(num_clusters_) ||
+            cached_num_points != static_cast<uint64_t>(num_points) ||
+            cached_dim != static_cast<uint64_t>(dim) ||
+            cached_dataset_basename != expected_basename) {
             return false;
         }
-    }
 
-    std::vector<int32_t> serialized_membership(num_points);
-    in.read(reinterpret_cast<char *>(serialized_membership.data()),
-            static_cast<std::streamsize>(num_points * sizeof(int32_t)));
-    if (!in.good()) {
+        H5::DataSet centroids_ds = in.openDataSet("centroids");
+        H5::DataSet membership_ds = in.openDataSet("membership");
+
+        centroids_.assign(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f));
+        membership_.assign(num_points, -1);
+
+        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
+        centroids_ds.read(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
+        for (int c = 0; c < num_clusters_; ++c) {
+            const std::size_t base = static_cast<std::size_t>(c) * dim;
+            for (std::size_t j = 0; j < dim; ++j) {
+                centroids_[static_cast<std::size_t>(c)][j] = centroid_raw[base + j];
+            }
+        }
+
+        std::vector<int32_t> serialized_membership(num_points);
+        membership_ds.read(serialized_membership.data(), H5::PredType::NATIVE_INT32);
+        for (std::size_t i = 0; i < num_points; ++i) {
+            membership_[i] = static_cast<int>(serialized_membership[i]);
+        }
+    } catch (const H5::Exception &) {
         return false;
-    }
-
-    for (std::size_t i = 0; i < num_points; ++i) {
-        membership_[i] = static_cast<int>(serialized_membership[i]);
     }
 
     for (int m : membership_) {
@@ -248,7 +301,6 @@ bool SerialKNNAlgorithm::load_clusters_from_cache() {
             return false;
         }
     }
-
     return true;
 }
 
@@ -259,7 +311,7 @@ void SerialKNNAlgorithm::save_clusters_to_cache() const {
     }
     const std::size_t num_points = points.size();
     const std::size_t dim = points[0].size();
-    const uint64_t ds_sig = dataset_signature();
+    const std::string dataset_basename = cache_utils::dataset_basename(dataset_);
 
     if (!ensure_cache_root_dir()) {
         std::cerr << "Warning: failed to create cluster cache dir '" << cache_root_dir()
@@ -267,39 +319,38 @@ void SerialKNNAlgorithm::save_clusters_to_cache() const {
         return;
     }
 
-    std::ofstream out(get_cache_path().c_str(), std::ios::binary);
-    if (!out) {
-        std::cerr << "Warning: failed to open cluster cache file for write: " << get_cache_path()
-                  << '\n';
-        return;
-    }
+    try {
+        H5::H5File out(get_cache_path().c_str(), H5F_ACC_TRUNC);
+        write_i32_attr(out, "format_version", kCacheFormatVersion);
+        write_str_attr(out, "algorithm", kCacheAlgorithm);
+        write_i32_attr(out, "num_clusters", static_cast<int32_t>(num_clusters_));
+        write_u64_attr(out, "num_points", static_cast<uint64_t>(num_points));
+        write_u64_attr(out, "dim", static_cast<uint64_t>(dim));
+        write_str_attr(out, "dataset_basename", dataset_basename);
 
-    const uint32_t kMagic = 0x4B4D4348; // "KMCH"
-    const uint32_t kVersion = 2;
-    const int32_t saved_num_clusters = static_cast<int32_t>(num_clusters_);
-    const uint64_t saved_num_points = static_cast<uint64_t>(num_points);
-    const uint64_t saved_dim = static_cast<uint64_t>(dim);
+        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
+        for (int c = 0; c < num_clusters_; ++c) {
+            const std::size_t base = static_cast<std::size_t>(c) * dim;
+            for (std::size_t j = 0; j < dim; ++j) {
+                centroid_raw[base + j] = centroids_[static_cast<std::size_t>(c)][j];
+            }
+        }
+        hsize_t centroid_dims[2] = {static_cast<hsize_t>(num_clusters_), static_cast<hsize_t>(dim)};
+        H5::DataSpace centroid_space(2, centroid_dims);
+        H5::DataSet centroid_ds =
+            out.createDataSet("centroids", H5::PredType::IEEE_F32LE, centroid_space);
+        centroid_ds.write(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
 
-    out.write(reinterpret_cast<const char *>(&kMagic), sizeof(kMagic));
-    out.write(reinterpret_cast<const char *>(&kVersion), sizeof(kVersion));
-    out.write(reinterpret_cast<const char *>(&saved_num_clusters), sizeof(saved_num_clusters));
-    out.write(reinterpret_cast<const char *>(&saved_num_points), sizeof(saved_num_points));
-    out.write(reinterpret_cast<const char *>(&saved_dim), sizeof(saved_dim));
-    out.write(reinterpret_cast<const char *>(&ds_sig), sizeof(ds_sig));
-
-    for (int c = 0; c < num_clusters_; ++c) {
-        out.write(reinterpret_cast<const char *>(centroids_[static_cast<std::size_t>(c)].data()),
-                  static_cast<std::streamsize>(dim * sizeof(float)));
-    }
-
-    std::vector<int32_t> serialized_membership(num_points);
-    for (std::size_t i = 0; i < num_points; ++i) {
-        serialized_membership[i] = static_cast<int32_t>(membership_[i]);
-    }
-    out.write(reinterpret_cast<const char *>(serialized_membership.data()),
-              static_cast<std::streamsize>(num_points * sizeof(int32_t)));
-
-    if (!out.good()) {
+        std::vector<int32_t> serialized_membership(num_points);
+        for (std::size_t i = 0; i < num_points; ++i) {
+            serialized_membership[i] = static_cast<int32_t>(membership_[i]);
+        }
+        hsize_t membership_dims[1] = {static_cast<hsize_t>(num_points)};
+        H5::DataSpace membership_space(1, membership_dims);
+        H5::DataSet membership_ds =
+            out.createDataSet("membership", H5::PredType::STD_I32LE, membership_space);
+        membership_ds.write(serialized_membership.data(), H5::PredType::NATIVE_INT32);
+    } catch (const H5::Exception &) {
         std::cerr << "Warning: failed while writing cluster cache file: " << get_cache_path()
                   << '\n';
         return;
