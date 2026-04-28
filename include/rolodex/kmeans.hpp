@@ -4,7 +4,6 @@
 #include "rolodex/query_result.hpp"
 #include "rolodex/types.hpp"
 
-#include <cstddef>
 #include <mpi.h>
 #include <string>
 #include <vector>

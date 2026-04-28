@@ -9,8 +9,8 @@
 Dataset::Dataset(std::string filename) : filename_(std::move(filename)) {}
 
 void Dataset::load_dataset() {
-    H5::H5File    file(filename_, H5F_ACC_RDONLY);
-    H5::DataSet   ds = file.openDataSet("/train");
+    H5::H5File file(filename_, H5F_ACC_RDONLY);
+    H5::DataSet ds = file.openDataSet("/train");
     H5::DataSpace sp = ds.getSpace();
 
     if (sp.getSimpleExtentNdims() != 2) {
@@ -27,17 +27,16 @@ void Dataset::load_dataset() {
     data_.resize(nrows_ * ncols_);
     ds.read(data_.data(), H5::PredType::NATIVE_FLOAT);
 
-    std::cout << "Loaded /train: " << nrows_ << " x " << ncols_
-              << " (flat buffer " << data_.size() * sizeof(float) / (1 << 20) << " MiB)\n";
+    std::cout << "Loaded /train: " << nrows_ << " x " << ncols_ << " (flat buffer "
+              << data_.size() * sizeof(float) / (1 << 20) << " MiB)\n";
 }
 
 // Built lazily — only called by OpenMP/MPI paths; serial never touches this.
-std::vector<TVector>& Dataset::get_points() {
+std::vector<TVector> &Dataset::get_points() {
     if (points_cache_.empty() && nrows_ > 0) {
         points_cache_.resize(nrows_, TVector(ncols_));
         for (std::size_t i = 0; i < nrows_; i++) {
-            std::copy(data_.data() + i * ncols_,
-                      data_.data() + i * ncols_ + ncols_,
+            std::copy(data_.data() + i * ncols_, data_.data() + i * ncols_ + ncols_,
                       points_cache_[i].data());
         }
     }
