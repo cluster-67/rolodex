@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(OpenMP REQUIRED)
+find_package(MPI REQUIRED)
 # On Cray systems, this is typically provided by loading the `cray-hdf5` module.
 find_package(HDF5 REQUIRED COMPONENTS CXX)
 
@@ -34,12 +35,17 @@ target_include_directories(knn PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${HDF5_INCLUDE_DIRS}
 )
+target_compile_options(knn PRIVATE -O3 -march=native -funroll-loops)
 
-# add_executable(serial main.cpp serial.cpp common.h)
-
-# add_executable(openmp main.cpp openmp.cpp common.h)
-# target_link_libraries(openmp PRIVATE OpenMP::OpenMP_CXX)
-
-# Copy the job scripts
-# configure_file(job-serial job-serial COPYONLY)
-# configure_file(job-openmp job-openmp COPYONLY)
+add_executable(knn_mpi
+    src/knn_mpi_main.cpp
+    src/dataset.cpp
+    src/cache_utils.cpp
+    src/kmeans.cpp
+    src/kmeans_mpi.cpp
+)
+target_link_libraries(knn_mpi PRIVATE HDF5::HDF5 MPI::MPI_CXX)
+target_include_directories(knn_mpi PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${HDF5_INCLUDE_DIRS}
+)

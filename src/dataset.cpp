@@ -6,41 +6,42 @@
 #include <stdexcept>
 #include <utility>
 
-Dataset::Dataset(std::string filename) {
-    filename_ = std::move(filename);
-}
+Dataset::Dataset(std::string filename) : filename_(std::move(filename)) {}
 
 void Dataset::load_dataset() {
-    H5::H5File file(filename_, H5F_ACC_RDONLY);
+    H5::H5File    file(filename_, H5F_ACC_RDONLY);
+    H5::DataSet   ds = file.openDataSet("/train");
+    H5::DataSpace sp = ds.getSpace();
 
-    H5::DataSet dataset = file.openDataSet("/train");
-    H5::DataSpace dataspace = dataset.getSpace();
-    int rank = dataspace.getSimpleExtentNdims();
-    if (rank != 2) {
-        std::cerr << "Expected /train to be rank-2, got rank " << rank << '\n';
+    if (sp.getSimpleExtentNdims() != 2) {
+        std::cerr << "Expected /train to be rank-2\n";
         return;
     }
 
     hsize_t dims[2];
-    dataspace.getSimpleExtentDims(dims);
-    const auto nrows = static_cast<std::size_t>(dims[0]);
-    const auto ncols = static_cast<std::size_t>(dims[1]);
+    sp.getSimpleExtentDims(dims);
+    nrows_ = static_cast<std::size_t>(dims[0]);
+    ncols_ = static_cast<std::size_t>(dims[1]);
 
-    std::vector<float> raw(nrows * ncols);
-    dataset.read(raw.data(), H5::PredType::NATIVE_FLOAT);
+    // Read directly into the flat buffer — no scatter into TVector.
+    data_.resize(nrows_ * ncols_);
+    ds.read(data_.data(), H5::PredType::NATIVE_FLOAT);
 
-    points_.assign(nrows, TVector(ncols));
-    for (std::size_t i = 0; i < nrows; ++i) {
-        for (std::size_t j = 0; j < ncols; ++j) {
-            points_[i][j] = raw[i * ncols + j];
-        }
-    }
-
-    std::cout << "Loaded /train into points with shape " << nrows << "x" << ncols << '\n';
+    std::cout << "Loaded /train: " << nrows_ << " x " << ncols_
+              << " (flat buffer " << data_.size() * sizeof(float) / (1 << 20) << " MiB)\n";
 }
 
-std::vector<TVector> &Dataset::get_points() {
-    return points_;
+// Built lazily — only called by OpenMP/MPI paths; serial never touches this.
+std::vector<TVector>& Dataset::get_points() {
+    if (points_cache_.empty() && nrows_ > 0) {
+        points_cache_.resize(nrows_, TVector(ncols_));
+        for (std::size_t i = 0; i < nrows_; i++) {
+            std::copy(data_.data() + i * ncols_,
+                      data_.data() + i * ncols_ + ncols_,
+                      points_cache_[i].data());
+        }
+    }
+    return points_cache_;
 }
 
 const std::string &Dataset::filename() const {
@@ -109,6 +110,7 @@ void Dataset::load_validation_dataset(int count) {
     validation_points_.reserve(queries_to_load);
     for (std::size_t i = 0; i < queries_to_load; ++i) {
         ValidationPoint validation_point;
+        validation_point.query.reserve(dim);
         for (std::size_t j = 0; j < dim; ++j) {
             validation_point.query.push_back(test_raw[i * dim + j]);
         }

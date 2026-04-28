@@ -4,6 +4,8 @@
 #include "rolodex/query_result.hpp"
 #include "rolodex/types.hpp"
 
+#include <cstddef>
+#include <mpi.h>
 #include <string>
 #include <vector>
 
@@ -17,7 +19,6 @@ class KNNAlgorithm {
 
   public:
     KNNAlgorithm(Dataset *dataset, int num_clusters);
-
     virtual ~KNNAlgorithm() = default;
 
     /** Serial ignores `update_frequency`; OpenMP uses it for centroid update cadence. */
@@ -26,6 +27,7 @@ class KNNAlgorithm {
     virtual QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const = 0;
 };
 
+// ── Serial — flat memory layout ───────────────────────────────────────────────
 class SerialKNNAlgorithm : public KNNAlgorithm {
   public:
     SerialKNNAlgorithm(Dataset *dataset, int num_clusters);
@@ -47,6 +49,7 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 };
 
+// ── OpenMP — unchanged interface ──────────────────────────────────────────────
 class OpenMPKNNAlgorithm : public KNNAlgorithm {
   public:
     OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters);
@@ -63,4 +66,26 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
 
     int find_nearest_centroid(const TVector &point) const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
+};
+
+// ── MPI — conforms to KNNAlgorithm virtual interface ──────────────────────────
+class MPIKMeans : public KNNAlgorithm {
+  private:
+    int rank_;
+    int size_;
+    int global_n_;
+
+    std::vector<TVector> local_points_;
+    std::vector<int> local_membership_;
+    std::vector<TVector> centroids_;
+
+    void update_centroids();
+    int find_nearest_centroid(const TVector &point) const;
+    std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
+
+  public:
+    MPIKMeans(Dataset *dataset, int num_clusters, int rank, int size);
+
+    void create_clusters(int update_frequency = 1) override;
+    QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 };
