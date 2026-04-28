@@ -4,13 +4,18 @@
 #include "rolodex/query_result.hpp"
 #include "rolodex/types.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 class KNNAlgorithm {
   protected:
+    static const char *cache_root_dir();
     Dataset *dataset_;
     int num_clusters_;
+    uint64_t dataset_signature() const;
+    std::string build_cache_path(const char *algorithm_name) const;
+    bool ensure_cache_root_dir() const;
 
   public:
     KNNAlgorithm(Dataset *dataset, int num_clusters);
@@ -36,7 +41,6 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 
   private:
-    static constexpr const char *kClusterCacheDir = "data/cluster_cache";
     std::vector<TVector> centroids_;
     std::vector<int> membership_;
     std::string get_cache_path() const;
