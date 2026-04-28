@@ -12,12 +12,20 @@ command -v clang-format >/dev/null || {
   echo "clang-format not found after loading module: $1" >&2
   exit 1
 }
-file_count="$(find "$2/src" "$2/include" -type f | wc -l)"
+
+echo "[format] Skipping third_party directories"
+mapfile -d "" files < <(find "$2/src" "$2/include" -type f -not -path "*/third_party/*" -print0)
+
+file_count="${#files[@]}"
 echo "[format] Found ${file_count} file(s) under src/ and include/"
 if [ "$file_count" -eq 0 ]; then
   echo "[format] Nothing to format."
   exit 0
 fi
-find "$2/src" "$2/include" -type f -print0 | xargs -0r clang-format -i
+
+for file in "${files[@]}"; do
+  clang-format -i "$file"
+done
+
 echo "[format] Done."
 ' _ "$LLVM_MODULE" "$REPO_ROOT"
