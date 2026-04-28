@@ -1,6 +1,6 @@
 #include "rolodex/kmeans.hpp"
 
-#include "rolodex/cache_utils.hpp"
+#include "rolodex/utils.hpp"
 
 #include <sstream>
 
@@ -15,7 +15,7 @@ std::string KNNAlgorithm::build_cache_path(const char *algorithm_name) const {
     const std::vector<TVector> &points = dataset_->get_points();
     const std::size_t num_points = points.size();
     const std::size_t dim = points.empty() ? 0 : points[0].size();
-    const std::string basename = cache_utils::dataset_basename(dataset_);
+    const std::string basename = utils::cache::dataset_basename(dataset_);
 
     std::ostringstream out;
     out << cache_root_dir() << "/cache_" << algorithm_name << "_k" << num_clusters_ << "_n"
@@ -24,5 +24,5 @@ std::string KNNAlgorithm::build_cache_path(const char *algorithm_name) const {
 }
 
 bool KNNAlgorithm::ensure_cache_root_dir() const {
-    return cache_utils::ensure_dir_recursive(cache_root_dir(), 0775);
+    return utils::cache::ensure_dir_recursive(cache_root_dir(), 0775);
 }

@@ -1,6 +1,7 @@
 #include "rolodex/dataset.hpp"
 #include "rolodex/kmeans.hpp"
 #include "rolodex/timing.hpp"
+#include "rolodex/utils.hpp"
 #include "rolodex/validator.hpp"
 
 #include <iostream>
@@ -17,7 +18,7 @@ struct RunConfig {
     RunImplementation implementation;
     /** OpenMP centroid update cadence; ignored for Serial. */
     int update_frequency;
-    const char *dataset_file;
+    std::string dataset_file;
     int num_clusters;
     int top_k;
     int nprobe;
@@ -26,10 +27,10 @@ struct RunConfig {
     float vector_match_eps;
 };
 
-constexpr RunConfig kRunConfig = {
+const RunConfig kRunConfig = {
     RunImplementation::Serial,
     1,
-    "/pscratch/sd/a/ac3354/data/fashion-mnist-784-euclidean.hdf5",
+    utils::path::dataset_path("fashion-mnist-784-euclidean.hdf5"),
     10,
     5,
     3,

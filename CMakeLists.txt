@@ -22,7 +22,7 @@ endif ()
 add_executable(knn
     src/knn_main.cpp
     src/dataset.cpp
-    src/cache_utils.cpp
+    src/utils.cpp
     src/kmeans.cpp
     src/kmeans_serial.cpp
     src/kmeans_openmp.cpp
@@ -40,7 +40,7 @@ target_compile_options(knn PRIVATE -O3 -march=native -funroll-loops)
 add_executable(knn_mpi
     src/knn_mpi_main.cpp
     src/dataset.cpp
-    src/cache_utils.cpp
+    src/utils.cpp
     src/kmeans.cpp
     src/kmeans_mpi.cpp
 )

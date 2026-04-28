@@ -24,7 +24,11 @@ from matplotlib.patches import FancyBboxPatch
 import matplotlib.patheffects as pe
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-DATA_FILE  = "/pscratch/sd/a/asv48/data/fashion-mnist-784-euclidean.hdf5"
+SCRATCH_DIR = os.getenv("SCRATCH")
+if not SCRATCH_DIR:
+    raise RuntimeError("SCRATCH environment variable is not set")
+
+DATA_FILE  = os.path.join(SCRATCH_DIR, "data", "fashion-mnist-784-euclidean.hdf5")
 OUTPUT_SCATTER = "/global/homes/a/asv48/rolodex/fashion_mnist_tsne.png"
 OUTPUT_GALLERY = "/global/homes/a/asv48/rolodex/fashion_mnist_gallery.png"
 N_CLUSTERS = 10

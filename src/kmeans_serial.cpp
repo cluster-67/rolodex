@@ -1,7 +1,7 @@
 #include "rolodex/kmeans.hpp"
 
-#include "rolodex/cache_utils.hpp"
 #include "rolodex/distance.hpp"
+#include "rolodex/utils.hpp"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -238,7 +238,7 @@ bool SerialKNNAlgorithm::load_clusters_from_cache() {
 
     const std::size_t num_points = points.size();
     const std::size_t dim = points[0].size();
-    const std::string expected_basename = cache_utils::dataset_basename(dataset_);
+    const std::string expected_basename = utils::cache::dataset_basename(dataset_);
     const std::string cache_path = get_cache_path();
 
     struct stat st;
@@ -311,7 +311,7 @@ void SerialKNNAlgorithm::save_clusters_to_cache() const {
     }
     const std::size_t num_points = points.size();
     const std::size_t dim = points[0].size();
-    const std::string dataset_basename = cache_utils::dataset_basename(dataset_);
+    const std::string dataset_basename = utils::cache::dataset_basename(dataset_);
 
     if (!ensure_cache_root_dir()) {
         std::cerr << "Warning: failed to create cluster cache dir '" << cache_root_dir()

@@ -1,9 +1,10 @@
-#include "rolodex/cache_utils.hpp"
+#include "rolodex/utils.hpp"
 
 #include "rolodex/dataset.hpp"
 
 #include <cerrno>
-#include <string>
+#include <cstdlib>
+#include <stdexcept>
 #include <sys/stat.h>
 
 namespace {
@@ -14,7 +15,8 @@ bool stat_path(const std::string &path, struct stat &out) {
 
 } // namespace
 
-namespace cache_utils {
+namespace utils {
+namespace cache {
 
 bool ensure_dir_recursive(const std::string &path, int mode) {
     if (path.empty()) {
@@ -55,4 +57,21 @@ std::string dataset_basename(const Dataset *dataset) {
     return full.substr(slash + 1);
 }
 
-} // namespace cache_utils
+} // namespace cache
+
+namespace path {
+
+std::string scratch_dir() {
+    const char *scratch = std::getenv("SCRATCH");
+    if (scratch == nullptr || scratch[0] == '\0') {
+        throw std::runtime_error("SCRATCH environment variable is not set");
+    }
+    return std::string(scratch);
+}
+
+std::string dataset_path(const std::string &dataset_filename) {
+    return scratch_dir() + "/data/" + dataset_filename;
+}
+
+} // namespace path
+} // namespace utils
