@@ -3,18 +3,19 @@
 module load cray-hdf5 PrgEnv-gnu
 
 cd "$(dirname "$0")/build"
-make knn knn_openmp
+make knn
 
+# Implementation (Serial vs OpenMP) is selected in src/knn_main.cpp RunConfig.
 {
-    echo "=== SERIAL ==="
+    echo "=== knn (set RunImplementation in knn_main.cpp) ==="
     { time ./knn; }
 
-    echo "=== OPENMP 2 threads ==="
-    { time OMP_NUM_THREADS=2 ./knn_openmp; }
+    echo "=== same binary, OMP_NUM_THREADS=2 (affects OpenMP path only) ==="
+    { time OMP_NUM_THREADS=2 ./knn; }
 
-    echo "=== OPENMP 4 threads ==="
-    { time OMP_NUM_THREADS=4 ./knn_openmp; }
+    echo "=== same binary, OMP_NUM_THREADS=4 ==="
+    { time OMP_NUM_THREADS=4 ./knn; }
 
-    echo "=== OPENMP 8 threads ==="
-    { time OMP_NUM_THREADS=8 ./knn_openmp; }
+    echo "=== same binary, OMP_NUM_THREADS=8 ==="
+    { time OMP_NUM_THREADS=8 ./knn; }
 } 2>&1 | tee ../comparison.out

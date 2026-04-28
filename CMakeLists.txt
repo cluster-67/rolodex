@@ -22,30 +22,25 @@ endif ()
 add_executable(knn
     src/knn_main.cpp
     src/dataset.cpp
+    src/cache_utils.cpp
     src/kmeans.cpp
+    src/kmeans_serial.cpp
+    src/kmeans_openmp.cpp
+    src/validation.cpp
+    src/timing.cpp
+    src/validator.cpp
 )
-target_link_libraries(knn PRIVATE HDF5::HDF5)
+target_link_libraries(knn PRIVATE HDF5::HDF5 OpenMP::OpenMP_CXX)
 target_include_directories(knn PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${HDF5_INCLUDE_DIRS}
 )
 target_compile_options(knn PRIVATE -O3 -march=native -funroll-loops)
 
-add_executable(knn_openmp
-    src/knn_openmp_main.cpp
-    src/dataset.cpp
-    src/kmeans.cpp
-    src/kmeans_openmp.cpp
-)
-target_link_libraries(knn_openmp PRIVATE HDF5::HDF5 OpenMP::OpenMP_CXX)
-target_include_directories(knn_openmp PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${HDF5_INCLUDE_DIRS}
-)
-
 add_executable(knn_mpi
     src/knn_mpi_main.cpp
     src/dataset.cpp
+    src/cache_utils.cpp
     src/kmeans.cpp
     src/kmeans_mpi.cpp
 )

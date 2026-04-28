@@ -2,13 +2,15 @@
 
 #include "rolodex/distance.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
 MPIKMeans::MPIKMeans(Dataset *dataset, int num_clusters, int rank, int size)
     : KNNAlgorithm(dataset, num_clusters), rank_(rank), size_(size), global_n_(0) {}
 
-void MPIKMeans::create_clusters() {
+void MPIKMeans::create_clusters(int update_frequency) {
+    (void)update_frequency;
     // ── Step 1: rank 0 reads the dataset and flattens it ─────────────────────
     int N = 0, D = 0;
     std::vector<float> flat_data;
@@ -59,8 +61,8 @@ void MPIKMeans::create_clusters() {
     const int local_n = counts[static_cast<std::size_t>(rank_)] / D;
     std::vector<float> local_flat(static_cast<std::size_t>(local_n * D));
 
-    MPI_Scatterv(flat_data.data(), counts.data(), displs.data(), MPI_FLOAT,
-                 local_flat.data(), local_n * D, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(flat_data.data(), counts.data(), displs.data(), MPI_FLOAT, local_flat.data(),
+                 local_n * D, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
     local_points_.assign(static_cast<std::size_t>(local_n), TVector(static_cast<std::size_t>(D)));
     for (int i = 0; i < local_n; i++) {
@@ -70,7 +72,8 @@ void MPIKMeans::create_clusters() {
         }
     }
 
-    centroids_.assign(static_cast<std::size_t>(num_clusters_), TVector(static_cast<std::size_t>(D)));
+    centroids_.assign(static_cast<std::size_t>(num_clusters_),
+                      TVector(static_cast<std::size_t>(D)));
     for (int c = 0; c < num_clusters_; c++) {
         for (int d = 0; d < D; d++) {
             centroids_[static_cast<std::size_t>(c)][static_cast<std::size_t>(d)] =
@@ -80,7 +83,7 @@ void MPIKMeans::create_clusters() {
 
     local_membership_.assign(static_cast<std::size_t>(local_n), -1);
 
-    const int   max_iters             = 10000;
+    const int max_iters = 10000;
     const float convergence_threshold = 0.001f;
     int iters = 0;
 
@@ -102,8 +105,8 @@ void MPIKMeans::create_clusters() {
         MPI_Allreduce(&local_changes, &global_changes, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
         if (rank_ == 0) {
-            std::cout << "Iteration " << iters
-                      << " with " << global_changes << " membership changes\n";
+            std::cout << "Iteration " << iters << " with " << global_changes
+                      << " membership changes\n";
         }
 
         const float change_ratio =
@@ -120,7 +123,7 @@ void MPIKMeans::create_clusters() {
 
 void MPIKMeans::update_centroids() {
     const int local_n = static_cast<int>(local_points_.size());
-    const int dim     = static_cast<int>(local_points_[0].size());
+    const int dim = static_cast<int>(local_points_[0].size());
 
     // Pack layout per cluster: [sum_0 … sum_{D-1} | count].
     // One Allreduce carries both sums and counts, halving collective calls vs.
@@ -131,7 +134,7 @@ void MPIKMeans::update_centroids() {
 
     // Step 4: each rank accumulates its local partial sums and counts.
     for (int i = 0; i < local_n; i++) {
-        const int c    = local_membership_[static_cast<std::size_t>(i)];
+        const int c = local_membership_[static_cast<std::size_t>(i)];
         const int base = c * (dim + 1);
         for (int d = 0; d < dim; d++) {
             local_buf[static_cast<std::size_t>(base + d)] +=
@@ -141,12 +144,12 @@ void MPIKMeans::update_centroids() {
     }
 
     // Communication 2: one Allreduce gives every rank the global sums and counts.
-    MPI_Allreduce(local_buf.data(), global_buf.data(), buf_size,
-                  MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(local_buf.data(), global_buf.data(), buf_size, MPI_FLOAT, MPI_SUM,
+                  MPI_COMM_WORLD);
 
     // Step 5: every rank recomputes the same new centroids independently.
     for (int c = 0; c < num_clusters_; c++) {
-        const int   base  = c * (dim + 1);
+        const int base = c * (dim + 1);
         const float count = global_buf[static_cast<std::size_t>(base + dim)];
         if (count > 0.0f) {
             for (int d = 0; d < dim; d++) {
@@ -157,32 +160,65 @@ void MPIKMeans::update_centroids() {
     }
 }
 
-int MPIKMeans::find_nearest_centroid(TVector &point) {
-    int   nearest = 0;
-    float best    = squared_l2(point, centroids_[0]);
+int MPIKMeans::find_nearest_centroid(const TVector &point) const {
+    int nearest = 0;
+    float best = squared_l2(point, centroids_[0]);
     for (int c = 1; c < num_clusters_; c++) {
         const float d = squared_l2(point, centroids_[static_cast<std::size_t>(c)]);
         if (d < best) {
-            best    = d;
+            best = d;
             nearest = c;
         }
     }
     return nearest;
 }
 
-std::vector<TVector> MPIKMeans::query_clusters(TVector &query, int top_k) {
-    (void)top_k;
-    const int nearest_centroid_idx = find_nearest_centroid(query);
-    std::vector<int> nearest_points_indices = find_nearest_points(nearest_centroid_idx, top_k);
-    std::vector<TVector> nearest_points;
-    nearest_points.reserve(nearest_points_indices.size());
-    for (int idx : nearest_points_indices) {
-        nearest_points.push_back(local_points_[static_cast<std::size_t>(idx)]);
+QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprobe) const {
+    (void)nprobe;
+    if (top_k <= 0 || local_points_.empty() || num_clusters_ <= 0) {
+        return QueryResult{};
     }
-    return nearest_points;
+
+    const int nearest_centroid_idx = find_nearest_centroid(query);
+    const std::vector<int> candidate_indices = find_nearest_points(nearest_centroid_idx, top_k);
+    if (candidate_indices.empty()) {
+        return QueryResult{};
+    }
+
+    std::vector<std::pair<float, std::size_t>> scored;
+    scored.reserve(candidate_indices.size());
+    for (int idx : candidate_indices) {
+        const std::size_t i = static_cast<std::size_t>(idx);
+        if (i >= local_points_.size()) {
+            continue;
+        }
+        scored.emplace_back(squared_l2(query, local_points_[i]), i);
+    }
+    if (scored.empty()) {
+        return QueryResult{};
+    }
+
+    const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
+    std::partial_sort(
+        scored.begin(), scored.begin() + static_cast<long>(k_out), scored.end(),
+        [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
+            if (a.first != b.first) {
+                return a.first < b.first;
+            }
+            return a.second < b.second;
+        });
+
+    QueryResult result;
+    result.neighbors.reserve(k_out);
+    result.distances.reserve(k_out);
+    for (std::size_t i = 0; i < k_out; ++i) {
+        result.neighbors.push_back(local_points_[scored[i].second]);
+        result.distances.push_back(scored[i].first);
+    }
+    return result;
 }
 
-std::vector<int> MPIKMeans::find_nearest_points(int centroid_idx, int top_k) {
+std::vector<int> MPIKMeans::find_nearest_points(int centroid_idx, int top_k) const {
     (void)top_k;
     std::vector<int> nearest_points_indices;
     for (std::size_t i = 0; i < local_points_.size(); i++) {

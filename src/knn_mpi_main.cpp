@@ -1,8 +1,8 @@
 #include "rolodex/dataset.hpp"
 #include "rolodex/kmeans.hpp"
 
-#include <mpi.h>
 #include <iostream>
+#include <mpi.h>
 #include <string>
 
 const std::string usr = "asv48";
@@ -14,7 +14,8 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    const std::string dataset_file = "/pscratch/sd/a/" + usr + "/data/fashion-mnist-784-euclidean.hdf5";
+    const std::string dataset_file =
+        "/pscratch/sd/a/" + usr + "/data/fashion-mnist-784-euclidean.hdf5";
 
     Dataset dataset(dataset_file);
     if (rank == 0) {

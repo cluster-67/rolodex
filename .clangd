@@ -1,3 +1,7 @@
 CompileFlags:
+  CompilationDatabase: build
   Add:
+    - -Iinclude
     - -I/opt/cray/pe/hdf5/1.12.2.9/gnu/12.3/include
+    - -isystem
+    - /opt/cray/pe/mpich/9.0.1/ofi/gnu/12.3/include
