@@ -5,7 +5,7 @@ module load cray-hdf5 PrgEnv-gnu
 cd "$(dirname "$0")/build"
 make knn
 
-OUT="../update_iters.out"
+OUT="../scripts/update_iters.out"
 > "$OUT"
 
 THREAD_COUNTS=(2 4 8)
