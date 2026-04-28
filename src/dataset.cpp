@@ -55,6 +55,7 @@ void Dataset::load_validation_dataset(int count) {
     H5::H5File file(filename_, H5F_ACC_RDONLY);
 
     H5::DataSet dataset = file.openDataSet("/test");
+    H5::DataSet train_dataset = file.openDataSet("/train");
     H5::DataSpace dataspace = dataset.getSpace();
     int rank = dataspace.getSimpleExtentNdims();
     if (rank != 2) {
@@ -126,7 +127,7 @@ void Dataset::load_validation_dataset(int count) {
             neighbor_indices.push_back(neighbor_idx);
             validation_point.distances.push_back(distances_raw[idx]);
         }
-        validation_point.neighbors = read_train_rows(neighbor_indices);
+        validation_point.neighbors = read_train_rows(&train_dataset, neighbor_indices);
         validation_points_.push_back(std::move(validation_point));
     }
 
@@ -138,11 +139,13 @@ const std::vector<ValidationPoint> &Dataset::get_validation_points() const {
     return validation_points_;
 }
 
-std::vector<TVector> Dataset::read_train_rows(const std::vector<int> &rows) {
-    H5::H5File file(filename_, H5F_ACC_RDONLY);
-    H5::DataSet dataset = file.openDataSet("/train");
+std::vector<TVector> Dataset::read_train_rows(H5::DataSet *train_dataset,
+                                              const std::vector<int> &rows) {
+    if (train_dataset == nullptr) {
+        throw std::runtime_error("Train dataset handle is null");
+    }
 
-    H5::DataSpace dataspace = dataset.getSpace();
+    H5::DataSpace dataspace = train_dataset->getSpace();
     const int rank = dataspace.getSimpleExtentNdims();
     if (rank != 2) {
         throw std::runtime_error("Expected /train to be rank-2");
@@ -152,6 +155,7 @@ std::vector<TVector> Dataset::read_train_rows(const std::vector<int> &rows) {
     dataspace.getSimpleExtentDims(dims);
     const std::size_t nrows = static_cast<std::size_t>(dims[0]);
     const std::size_t ncols = static_cast<std::size_t>(dims[1]);
+
     std::vector<TVector> result;
     result.reserve(rows.size());
 
@@ -160,7 +164,7 @@ std::vector<TVector> Dataset::read_train_rows(const std::vector<int> &rows) {
             throw std::runtime_error("Neighbor index out of bounds for /train");
         }
 
-        H5::DataSpace row_space = dataset.getSpace();
+        H5::DataSpace row_space = train_dataset->getSpace();
         hsize_t offset[2] = {static_cast<hsize_t>(row), 0};
         hsize_t count[2] = {1, dims[1]};
         row_space.selectHyperslab(H5S_SELECT_SET, count, offset);
@@ -169,7 +173,7 @@ std::vector<TVector> Dataset::read_train_rows(const std::vector<int> &rows) {
         H5::DataSpace memspace(2, mem_dims);
 
         TVector buffer(ncols);
-        dataset.read(buffer.data(), H5::PredType::NATIVE_FLOAT, memspace, row_space);
+        train_dataset->read(buffer.data(), H5::PredType::NATIVE_FLOAT, memspace, row_space);
         result.push_back(std::move(buffer));
     }
 

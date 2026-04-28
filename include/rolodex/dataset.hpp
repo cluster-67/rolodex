@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+namespace H5 {
+class DataSet;
+}
+
 struct ValidationPoint {
     TVector query;
     std::vector<TVector> neighbors;
@@ -74,5 +78,5 @@ class Dataset {
     std::size_t ncols_ = 0;
     std::vector<TVector> points_cache_; // populated on demand by get_points()
     std::vector<ValidationPoint> validation_points_;
-    std::vector<TVector> read_train_rows(const std::vector<int> &rows);
+    std::vector<TVector> read_train_rows(H5::DataSet *train_dataset, const std::vector<int> &rows);
 };
