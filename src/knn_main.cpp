@@ -27,7 +27,7 @@ struct RunConfig {
 };
 
 constexpr RunConfig kRunConfig = {
-    RunImplementation::OpenMP,
+    RunImplementation::Serial,
     1,
     "/pscratch/sd/a/ac3354/data/fashion-mnist-784-euclidean.hdf5",
     10,

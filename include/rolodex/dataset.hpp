@@ -47,6 +47,7 @@ class Dataset {
     void load_validation_dataset(int count = -1);
 
     std::vector<TVector> &get_points();
+    const std::string &filename() const;
     const std::vector<ValidationPoint> &get_validation_points() const;
 
   private:

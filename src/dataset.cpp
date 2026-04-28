@@ -43,6 +43,10 @@ std::vector<TVector> &Dataset::get_points() {
     return points_;
 }
 
+const std::string &Dataset::filename() const {
+    return filename_;
+}
+
 void Dataset::load_validation_dataset(int count) {
     if (!validation_points_.empty()) {
         return;

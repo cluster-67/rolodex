@@ -21,7 +21,9 @@ endif ()
 add_executable(knn
     src/knn_main.cpp
     src/dataset.cpp
+    src/cache_utils.cpp
     src/kmeans.cpp
+    src/kmeans_serial.cpp
     src/kmeans_openmp.cpp
     src/validation.cpp
     src/timing.cpp
