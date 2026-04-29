@@ -69,7 +69,13 @@ int main(int argc, char **argv) {
     const std::string dataset_file = dataset_path_from_name(cfg.dataset_file);
     Dataset dataset(dataset_file);
     if (!mpi.enabled || mpi.rank == 0) {
+        const auto dataset_load_start = rolodex::timing::SteadyClock::now();
+
         dataset.load_dataset();
+
+        const double dataset_load_ms = rolodex::timing::millis_between(
+            dataset_load_start, rolodex::timing::SteadyClock::now());
+        std::cout << "train_dataset_load_time_ms=" << dataset_load_ms << '\n';
     }
 
     std::unique_ptr<KNNAlgorithm> knn_algorithm;
@@ -104,7 +110,13 @@ int main(int argc, char **argv) {
 
     if (!mpi.enabled || mpi.rank == 0) {
         try {
+            const auto validation_load_start = rolodex::timing::SteadyClock::now();
+
             dataset.load_validation_dataset(cfg.validation_count);
+
+            const double validation_load_ms = rolodex::timing::millis_between(
+                validation_load_start, rolodex::timing::SteadyClock::now());
+            std::cout << "validation_dataset_load_time_ms=" << validation_load_ms << '\n';
         } catch (const std::exception &e) {
             std::cerr << "Failed to load validation dataset: " << e.what() << '\n';
             if (mpi.enabled) {
