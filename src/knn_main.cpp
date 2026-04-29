@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 
 #include <mpi.h>
 
@@ -17,6 +18,23 @@ struct MpiContext {
     int rank = 0;
     int size = 1;
 };
+
+std::string dataset_path_from_name(const std::string &dataset_name) {
+    if (dataset_name == "fashion-mnist") {
+        return utils::path::dataset_path("fashion-mnist-784-euclidean.hdf5");
+    }
+    if (dataset_name == "gist") {
+        return utils::path::dataset_path("gist-960-euclidean.hdf5");
+    }
+    if (dataset_name == "mnist") {
+        return utils::path::dataset_path("mnist-784-euclidean.hdf5");
+    }
+    if (dataset_name == "sift") {
+        return utils::path::dataset_path("sift-128-euclidean.hdf5");
+    }
+    throw std::runtime_error("Invalid dataset '" + dataset_name +
+                             "'. Expected one of: fashion-mnist, gist, mnist, sift.");
+}
 
 } // namespace
 
@@ -48,7 +66,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    Dataset dataset(cfg.dataset_file);
+    const std::string dataset_file = dataset_path_from_name(cfg.dataset_file);
+    Dataset dataset(dataset_file);
     if (!mpi.enabled || mpi.rank == 0) {
         dataset.load_dataset();
     }

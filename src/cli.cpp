@@ -1,7 +1,5 @@
 #include "rolodex/cli.hpp"
 
-#include "rolodex/utils.hpp"
-
 #include "rolodex/third_party/CLI11.hpp"
 
 #include <stdexcept>
@@ -53,10 +51,10 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     cfg.implementation = RunImplementation::Serial; // overwritten by required positional
     cfg.update_frequency = 1;
     cfg.cache_enabled = false;
-    cfg.dataset_file = utils::path::dataset_path("fashion-mnist-784-euclidean.hdf5");
+    cfg.dataset_file = "fashion-mnist";
     cfg.num_clusters = 10;
     cfg.top_k = 5;
-    cfg.nprobe = 3;
+    cfg.nprobe = 1;
     cfg.validation_count = 10;
     cfg.vector_match_eps = 1e-4f;
 
@@ -67,7 +65,8 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
         app.add_option("impl", impl_str, "Implementation backend: serial|openmp|mpi")->required();
     impl_opt->check(CLI::IsMember({"serial", "openmp", "mpi"}));
 
-    app.add_option("--dataset", cfg.dataset_file, "Path to HDF5 dataset file")
+    app.add_option("--dataset", cfg.dataset_file, "Dataset name: fashion-mnist|gist|mnist|sift")
+        ->check(CLI::IsMember({"fashion-mnist", "gist", "mnist", "sift"}))
         ->default_val(cfg.dataset_file);
 
     app.add_option("-k,--num-clusters", cfg.num_clusters, "Number of k-means clusters")

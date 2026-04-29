@@ -32,8 +32,8 @@ ValidationSummary Validator::run(std::ostream &out, std::ostream &err) const {
                                                               config_.vector_match_eps);
         recall_sum += recall;
 
-        out << "query=" << qi << " recall@" << config_.top_k << "=" << recall
-            << " query_time_ms=" << q_ms << '\n';
+        out << "query=" << qi << " top_k=" << config_.top_k << " nprobe=" << config_.nprobe
+            << " recall@" << config_.top_k << "=" << recall << " query_time_ms=" << q_ms << '\n';
 
         if (recall < 1.0f - 1e-6f) {
             err << "query=" << qi << " recall below 1.0; diagnostics:\n";
