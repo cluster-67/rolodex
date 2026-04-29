@@ -57,6 +57,7 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     cfg.nprobe = 1;
     cfg.validation_count = 10;
     cfg.vector_match_eps = 1e-4f;
+    cfg.debug_enabled = false;
 
     CLI::App app{"rolodex knn"};
 
@@ -84,6 +85,8 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     app.add_option("--vector-match-eps", cfg.vector_match_eps,
                    "Epsilon for vector equality in recall computation")
         ->default_val(cfg.vector_match_eps);
+    app.add_flag("--debug", cfg.debug_enabled,
+                 "Enable OpenMP debug snapshots (HDF5) under data/debug");
 
     try {
         app.parse(argc, argv);

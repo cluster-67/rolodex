@@ -52,7 +52,8 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
 // ── OpenMP — unchanged interface ──────────────────────────────────────────────
 class OpenMPKNNAlgorithm : public KNNAlgorithm {
   public:
-    OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled);
+    OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled,
+                       bool debug_enabled = false);
 
     void create_clusters(int update_frequency = 1) override;
 
@@ -61,11 +62,16 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 
   private:
+    static const char *debug_root_dir();
     std::vector<TVector> centroids_;
     std::vector<int> membership_;
+    bool debug_enabled_;
 
     int find_nearest_centroid(const TVector &point) const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
+    bool ensure_debug_root_dir() const;
+    std::string build_debug_snapshot_path(int iteration, bool is_final) const;
+    void save_debug_snapshot(int iteration, bool is_final) const;
 };
 
 // ── MPI — conforms to KNNAlgorithm virtual interface ──────────────────────────

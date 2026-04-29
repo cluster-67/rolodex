@@ -1,20 +1,56 @@
 #include "rolodex/kmeans.hpp"
 
 #include "rolodex/distance.hpp"
+#include "rolodex/utils.hpp"
 
+#include <H5Cpp.h>
 #include <algorithm>
+#include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <omp.h>
+#include <sstream>
 
-OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled)
-    : KNNAlgorithm(dataset, num_clusters, cache_enabled) {
+namespace {
+
+const int kDebugSnapshotCadence = 1;
+const int32_t kDebugSnapshotFormatVersion = 1;
+const char *kDebugAlgorithm = "openmp";
+
+void write_i32_attr(H5::H5Object &obj, const char *name, int32_t value) {
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, H5::PredType::STD_I32LE, scalar);
+    attr.write(H5::PredType::STD_I32LE, &value);
+}
+
+void write_u64_attr(H5::H5Object &obj, const char *name, uint64_t value) {
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, H5::PredType::STD_U64LE, scalar);
+    attr.write(H5::PredType::STD_U64LE, &value);
+}
+
+void write_str_attr(H5::H5Object &obj, const char *name, const std::string &value) {
+    H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, str_type, scalar);
+    attr.write(str_type, value);
+}
+
+} // namespace
+
+OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled,
+                                       bool debug_enabled)
+    : KNNAlgorithm(dataset, num_clusters, cache_enabled), debug_enabled_(debug_enabled) {
     centroids_.resize(static_cast<std::size_t>(num_clusters_));
     membership_.resize(dataset_->get_points().size(), -1);
 }
 
 void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
     std::vector<TVector> &points = dataset_->get_points();
+    if (points.empty() || num_clusters_ <= 0) {
+        return;
+    }
 
     // Step 1: Main thread randomly picks K initial centroids.
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
@@ -44,6 +80,10 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
         std::cout << "Iteration " << iters << " with " << membership_change_count
                   << " membership changes" << '\n';
 
+        if (debug_enabled_ && iters % kDebugSnapshotCadence == 0) {
+            save_debug_snapshot(iters, false);
+        }
+
         const float change_ratio =
             static_cast<float>(membership_change_count) / static_cast<float>(points.size());
 
@@ -54,6 +94,10 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
         if (iters % update_frequency == 0) {
             update_centroids();
         }
+    }
+
+    if (debug_enabled_) {
+        save_debug_snapshot(iters, true);
     }
 }
 
@@ -189,4 +233,80 @@ std::vector<int> OpenMPKNNAlgorithm::find_nearest_points(int centroid_idx, int t
         }
     }
     return nearest_points_indices;
+}
+
+const char *OpenMPKNNAlgorithm::debug_root_dir() {
+    return "data/debug";
+}
+
+bool OpenMPKNNAlgorithm::ensure_debug_root_dir() const {
+    return utils::cache::ensure_dir_recursive(debug_root_dir(), 0775);
+}
+
+std::string OpenMPKNNAlgorithm::build_debug_snapshot_path(int iteration, bool is_final) const {
+    std::ostringstream out;
+    out << debug_root_dir() << "/openmp_dataset_" << utils::cache::dataset_basename(dataset_)
+        << "_iter_" << iteration;
+    if (is_final) {
+        out << "_final";
+    }
+    out << ".h5";
+    return out.str();
+}
+
+void OpenMPKNNAlgorithm::save_debug_snapshot(int iteration, bool is_final) const {
+    if (!ensure_debug_root_dir()) {
+        std::cerr << "[debug] Warning: failed to create debug dir '" << debug_root_dir()
+                  << "': errno=" << errno << '\n';
+        return;
+    }
+
+    const std::vector<TVector> &points = dataset_->get_points();
+    if (points.empty()) {
+        return;
+    }
+    const std::size_t num_points = points.size();
+    const std::size_t dim = points[0].size();
+    const std::string path = build_debug_snapshot_path(iteration, is_final);
+
+    try {
+        H5::H5File out(path.c_str(), H5F_ACC_TRUNC);
+        write_i32_attr(out, "format_version", kDebugSnapshotFormatVersion);
+        write_str_attr(out, "algorithm", kDebugAlgorithm);
+        write_str_attr(out, "dataset_basename", utils::cache::dataset_basename(dataset_));
+        write_i32_attr(out, "iteration", static_cast<int32_t>(iteration));
+        write_i32_attr(out, "is_final", is_final ? 1 : 0);
+        write_i32_attr(out, "num_clusters", static_cast<int32_t>(num_clusters_));
+        write_u64_attr(out, "num_points", static_cast<uint64_t>(num_points));
+        write_u64_attr(out, "dim", static_cast<uint64_t>(dim));
+
+        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
+        for (int c = 0; c < num_clusters_; ++c) {
+            const std::size_t base = static_cast<std::size_t>(c) * dim;
+            for (std::size_t j = 0; j < dim; ++j) {
+                centroid_raw[base + j] = centroids_[static_cast<std::size_t>(c)][j];
+            }
+        }
+        hsize_t centroid_dims[2] = {static_cast<hsize_t>(num_clusters_), static_cast<hsize_t>(dim)};
+        H5::DataSpace centroid_space(2, centroid_dims);
+        H5::DataSet centroid_ds =
+            out.createDataSet("centroids", H5::PredType::IEEE_F32LE, centroid_space);
+        centroid_ds.write(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
+
+        std::vector<int32_t> serialized_membership(num_points);
+        for (std::size_t i = 0; i < num_points; ++i) {
+            serialized_membership[i] = static_cast<int32_t>(membership_[i]);
+        }
+        hsize_t membership_dims[1] = {static_cast<hsize_t>(num_points)};
+        H5::DataSpace membership_space(1, membership_dims);
+        H5::DataSet membership_ds =
+            out.createDataSet("membership", H5::PredType::STD_I32LE, membership_space);
+        membership_ds.write(serialized_membership.data(), H5::PredType::NATIVE_INT32);
+    } catch (const H5::Exception &) {
+        std::cerr << "[debug] Warning: failed while writing debug snapshot: " << path << '\n';
+        return;
+    }
+
+    std::cout << "[debug] Saved OpenMP snapshot: iteration=" << iteration
+              << " final=" << (is_final ? 1 : 0) << " path=" << path << '\n';
 }

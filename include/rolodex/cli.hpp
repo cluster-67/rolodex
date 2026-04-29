@@ -24,6 +24,8 @@ struct RunConfig {
     /** -1 loads all validation queries (clamped in Dataset to file size). */
     int validation_count;
     float vector_match_eps;
+    /** Enables OpenMP cluster debug snapshots under data/debug. */
+    bool debug_enabled;
 };
 
 /** Bootstrap: determine whether argv requests MPI, without full parsing. */

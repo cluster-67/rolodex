@@ -84,7 +84,8 @@ int main(int argc, char **argv) {
         knn_algorithm.reset(new SerialKNNAlgorithm(&dataset, cfg.num_clusters, cfg.cache_enabled));
         break;
     case rolodex::cli::RunImplementation::OpenMP:
-        knn_algorithm.reset(new OpenMPKNNAlgorithm(&dataset, cfg.num_clusters, cfg.cache_enabled));
+        knn_algorithm.reset(
+            new OpenMPKNNAlgorithm(&dataset, cfg.num_clusters, cfg.cache_enabled, cfg.debug_enabled));
         break;
     case rolodex::cli::RunImplementation::MPI:
         knn_algorithm.reset(
