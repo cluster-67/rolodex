@@ -4,8 +4,8 @@
 
 #include <sstream>
 
-KNNAlgorithm::KNNAlgorithm(Dataset *dataset, int num_clusters)
-    : dataset_(dataset), num_clusters_(num_clusters) {}
+KNNAlgorithm::KNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled)
+    : dataset_(dataset), num_clusters_(num_clusters), cache_enabled_(cache_enabled) {}
 
 const char *KNNAlgorithm::cache_root_dir() {
     return "data/cluster_cache";

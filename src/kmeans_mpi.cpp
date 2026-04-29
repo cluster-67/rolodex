@@ -6,8 +6,8 @@
 #include <cstdlib>
 #include <iostream>
 
-MPIKMeans::MPIKMeans(Dataset *dataset, int num_clusters, int rank, int size)
-    : KNNAlgorithm(dataset, num_clusters), rank_(rank), size_(size), global_n_(0) {}
+MPIKMeans::MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size)
+    : KNNAlgorithm(dataset, num_clusters, cache_enabled), rank_(rank), size_(size), global_n_(0) {}
 
 void MPIKMeans::create_clusters(int update_frequency) {
     (void)update_frequency;

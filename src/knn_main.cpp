@@ -56,13 +56,14 @@ int main(int argc, char **argv) {
     std::unique_ptr<KNNAlgorithm> knn_algorithm;
     switch (cfg.implementation) {
     case rolodex::cli::RunImplementation::Serial:
-        knn_algorithm.reset(new SerialKNNAlgorithm(&dataset, cfg.num_clusters));
+        knn_algorithm.reset(new SerialKNNAlgorithm(&dataset, cfg.num_clusters, cfg.cache_enabled));
         break;
     case rolodex::cli::RunImplementation::OpenMP:
-        knn_algorithm.reset(new OpenMPKNNAlgorithm(&dataset, cfg.num_clusters));
+        knn_algorithm.reset(new OpenMPKNNAlgorithm(&dataset, cfg.num_clusters, cfg.cache_enabled));
         break;
     case rolodex::cli::RunImplementation::MPI:
-        knn_algorithm.reset(new MPIKMeans(&dataset, cfg.num_clusters, mpi.rank, mpi.size));
+        knn_algorithm.reset(
+            new MPIKMeans(&dataset, cfg.num_clusters, cfg.cache_enabled, mpi.rank, mpi.size));
         break;
     }
 

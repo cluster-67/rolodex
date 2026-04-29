@@ -13,8 +13,8 @@
 #include <sys/stat.h>
 #include <utility>
 
-SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters)
-    : KNNAlgorithm(dataset, num_clusters) {
+SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled)
+    : KNNAlgorithm(dataset, num_clusters, cache_enabled) {
     centroids_.resize(static_cast<std::size_t>(num_clusters_));
     membership_.resize(dataset_->get_points().size(), -1);
 }
@@ -26,7 +26,7 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
         return;
     }
 
-    if (load_clusters_from_cache()) {
+    if (cache_enabled_ && load_clusters_from_cache()) {
         std::cout << "Loaded cluster cache from " << get_cache_path() << '\n';
         return;
     }
@@ -59,7 +59,9 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
         update_centroids();
     }
 
-    save_clusters_to_cache();
+    if (cache_enabled_) {
+        save_clusters_to_cache();
+    }
 }
 
 void SerialKNNAlgorithm::update_centroids() {

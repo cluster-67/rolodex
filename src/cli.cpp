@@ -52,6 +52,7 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     // Defaults (mirror previous `kRunConfig` in src/knn_main.cpp).
     cfg.implementation = RunImplementation::Serial; // overwritten by required positional
     cfg.update_frequency = 1;
+    cfg.cache_enabled = false;
     cfg.dataset_file = utils::path::dataset_path("fashion-mnist-784-euclidean.hdf5");
     cfg.num_clusters = 10;
     cfg.top_k = 5;
@@ -77,6 +78,7 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     app.add_option("--update-frequency", cfg.update_frequency,
                    "OpenMP centroid update cadence (ignored for serial/mpi)")
         ->default_val(cfg.update_frequency);
+    app.add_flag("--cache", cfg.cache_enabled, "Enable cluster cache (disabled by default)");
     app.add_option("--validation-count", cfg.validation_count,
                    "Number of validation queries to load (-1 = all)")
         ->default_val(cfg.validation_count);

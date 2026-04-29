@@ -13,11 +13,12 @@ class KNNAlgorithm {
     static const char *cache_root_dir();
     Dataset *dataset_;
     int num_clusters_;
+    bool cache_enabled_;
     std::string build_cache_path(const char *algorithm_name) const;
     bool ensure_cache_root_dir() const;
 
   public:
-    KNNAlgorithm(Dataset *dataset, int num_clusters);
+    KNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled);
     virtual ~KNNAlgorithm() = default;
 
     /** Serial ignores `update_frequency`; OpenMP uses it for centroid update cadence. */
@@ -29,7 +30,7 @@ class KNNAlgorithm {
 // ── Serial — flat memory layout ───────────────────────────────────────────────
 class SerialKNNAlgorithm : public KNNAlgorithm {
   public:
-    SerialKNNAlgorithm(Dataset *dataset, int num_clusters);
+    SerialKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled);
 
     void create_clusters(int update_frequency = 1) override;
 
@@ -51,7 +52,7 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
 // ── OpenMP — unchanged interface ──────────────────────────────────────────────
 class OpenMPKNNAlgorithm : public KNNAlgorithm {
   public:
-    OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters);
+    OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled);
 
     void create_clusters(int update_frequency = 1) override;
 
@@ -83,7 +84,7 @@ class MPIKMeans : public KNNAlgorithm {
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 
   public:
-    MPIKMeans(Dataset *dataset, int num_clusters, int rank, int size);
+    MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size);
 
     void create_clusters(int update_frequency = 1) override;
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;

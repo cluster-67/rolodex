@@ -7,8 +7,8 @@
 #include <iostream>
 #include <omp.h>
 
-OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters)
-    : KNNAlgorithm(dataset, num_clusters) {
+OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled)
+    : KNNAlgorithm(dataset, num_clusters, cache_enabled) {
     centroids_.resize(static_cast<std::size_t>(num_clusters_));
     membership_.resize(dataset_->get_points().size(), -1);
 }

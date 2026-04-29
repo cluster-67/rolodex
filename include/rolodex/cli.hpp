@@ -15,6 +15,8 @@ struct RunConfig {
     RunImplementation implementation;
     /** OpenMP centroid update cadence; ignored by Serial/MPI (current behavior). */
     int update_frequency;
+    /** Enables cluster cache load/save when supported by the implementation. */
+    bool cache_enabled;
     std::string dataset_file;
     int num_clusters;
     int top_k;
