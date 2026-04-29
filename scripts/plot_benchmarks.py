@@ -160,9 +160,9 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
     datasets = sorted(df["dataset"].unique())
     series_in_data = [s for s in SERIES_ORDER if any(df["series"] == s)]
 
-    ncols = 2
-    nrows = max(1, math.ceil(len(datasets) / ncols))
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(18, 6 * nrows))
+    ncols = max(1, len(datasets))
+    nrows = 1
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(7 * ncols, 6))
     axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
 
     for idx, dataset in enumerate(datasets):
@@ -185,6 +185,7 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
             dodge=False,
             ax=ax,
         )
+        bar_patches = list(ax.patches)
 
         group_bands = [
             ("OpenMP", "#4C72B0"),
@@ -207,7 +208,7 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
                 )
                 band_regions.append((band_start, band_end, group_prefix))
 
-        for patch in ax.patches:
+        for patch in bar_patches:
             height = patch.get_height()
             if not math.isfinite(height):
                 continue
@@ -228,7 +229,7 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
             legend.remove()
 
         ax.set_title(str(dataset))
-        ax.set_xlabel("Series")
+        ax.set_xlabel("")
         ax.set_ylabel(y_label)
         ax.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
         ax.yaxis.set_major_formatter(
