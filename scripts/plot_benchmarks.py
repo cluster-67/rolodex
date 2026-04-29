@@ -8,6 +8,7 @@ Creates two PNG files in a benchmark run directory:
 """
 
 import argparse
+import math
 import re
 import sys
 from pathlib import Path
@@ -16,11 +17,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+import pandas as pd
 import seaborn as sns
 
 
-BUILD_TIME_RE = re.compile(r"cluster_build_time_ms=([0-9]+(?:\.[0-9]+)?)")
-MEAN_MS_RE = re.compile(r"aggregate:\s+.*\bmean_ms=([0-9]+(?:\.[0-9]+)?)")
+FLOAT_RE = r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
+BUILD_TIME_RE = re.compile(rf"cluster_build_time_ms={FLOAT_RE}")
+MEAN_MS_RE = re.compile(rf"aggregate:\s+.*\bmean_ms={FLOAT_RE}")
 
 SERIES_ORDER = [
     "Serial",
@@ -34,6 +38,18 @@ SERIES_ORDER = [
     "MPI N=2 n=4",
     "MPI N=2 n=8",
 ]
+SERIES_PALETTE = {
+    series: color
+    for series, color in zip(SERIES_ORDER, sns.color_palette("tab10", n_colors=len(SERIES_ORDER)))
+}
+
+
+def choose_time_unit(max_ms: float) -> tuple[float, str, str]:
+    if max_ms < 1_000:
+        return 1.0, "Milliseconds (ms)", "ms"
+    if max_ms < 120_000:
+        return 1_000.0, "Seconds (s)", "s"
+    return 60_000.0, "Minutes (min)", "min"
 
 
 def parse_args() -> argparse.Namespace:
@@ -140,36 +156,111 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
         return
 
     sns.set_theme(style="whitegrid", context="talk")
-    fig, ax = plt.subplots(figsize=(12, 7))
+    df = pd.DataFrame(records)
+    datasets = sorted(df["dataset"].unique())
+    series_in_data = [s for s in SERIES_ORDER if any(df["series"] == s)]
 
-    # For now we usually have one dataset, but this supports multiple.
-    datasets = sorted({str(r["dataset"]) for r in records})
-    series_in_data = [s for s in SERIES_ORDER if any(r["series"] == s for r in records)]
+    ncols = 2
+    nrows = max(1, math.ceil(len(datasets) / ncols))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(18, 6 * nrows))
+    axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
 
-    for series in series_in_data:
-        xs: list[str] = []
-        ys: list[float] = []
-        for dataset in datasets:
-            value = next(
-                (
-                    float(r["milliseconds"])
-                    for r in records
-                    if r["series"] == series and r["dataset"] == dataset
-                ),
-                None,
-            )
-            if value is None:
+    for idx, dataset in enumerate(datasets):
+        ax = axes_flat[idx]
+        df_ds = df[df["dataset"] == dataset]
+        scale, y_label, unit = choose_time_unit(float(df_ds["milliseconds"].max()))
+        df_ds = df_ds.copy()
+        df_ds["value"] = df_ds["milliseconds"] / scale
+
+        sns.barplot(
+            data=df_ds,
+            x="series",
+            y="value",
+            hue="series",
+            order=series_in_data,
+            hue_order=series_in_data,
+            palette=SERIES_PALETTE,
+            estimator="mean",
+            errorbar=None,
+            dodge=False,
+            ax=ax,
+        )
+
+        group_bands = [
+            ("OpenMP", "#4C72B0"),
+            ("MPI", "#55A868"),
+        ]
+        band_regions: list[tuple[float, float, str]] = []
+        for group_prefix, band_color in group_bands:
+            group_positions = [
+                pos for pos, series_name in enumerate(series_in_data) if series_name.startswith(group_prefix)
+            ]
+            if group_positions:
+                band_start = min(group_positions) - 0.5
+                band_end = max(group_positions) + 0.5
+                ax.axvspan(
+                    band_start,
+                    band_end,
+                    color=band_color,
+                    alpha=0.10,
+                    zorder=0,
+                )
+                band_regions.append((band_start, band_end, group_prefix))
+
+        for patch in ax.patches:
+            height = patch.get_height()
+            if not math.isfinite(height):
                 continue
-            xs.append(dataset)
-            ys.append(value)
+            x_center = patch.get_x() + (patch.get_width() / 2.0)
+            label = f"{height:.0f}" if unit == "ms" else f"{height:.1f}"
+            ax.annotate(
+                label,
+                (x_center, height),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
 
-        if xs:
-            ax.plot(xs, ys, marker="o", linewidth=2, label=series)
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.remove()
 
-    ax.set_title(title)
-    ax.set_xlabel("Dataset")
-    ax.set_ylabel("Milliseconds")
-    ax.legend(loc="best", fontsize=10)
+        ax.set_title(str(dataset))
+        ax.set_xlabel("Series")
+        ax.set_ylabel(y_label)
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+        ax.yaxis.set_major_formatter(
+            FuncFormatter(lambda val, _pos: f"{val:.0f}" if unit == "ms" else f"{val:.1f}")
+        )
+        ymax = float(df_ds["value"].max())
+        ax.set_ylim(0, ymax * 1.10 if ymax > 0 else 1.0)
+        ax.set_xlim(-0.5, len(series_in_data) - 0.5)
+        ax.margins(x=0)
+        y_top = ax.get_ylim()[1]
+        group_label_y = y_top * 0.97
+        for band_start, band_end, group_name in band_regions:
+            ax.text(
+                (band_start + band_end) / 2.0,
+                group_label_y,
+                group_name,
+                ha="center",
+                va="top",
+                fontsize=9,
+                color="#444444",
+                fontweight="semibold",
+            )
+        ax.tick_params(axis="x", labelrotation=40)
+        for tick_label in ax.get_xticklabels():
+            tick_label.set_horizontalalignment("right")
+            tick_label.set_rotation_mode("anchor")
+
+    for idx in range(len(datasets), len(axes_flat)):
+        axes_flat[idx].axis("off")
+
+    fig.suptitle(title, fontsize=18, y=0.98)
+    fig.subplots_adjust(top=0.90)
     fig.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
