@@ -10,6 +10,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "16")
 import warnings
 warnings.filterwarnings("ignore")
 
+from pathlib import Path
 import numpy as np
 import h5py
 from sklearn.manifold import TSNE
@@ -29,8 +30,10 @@ if not SCRATCH_DIR:
     raise RuntimeError("SCRATCH environment variable is not set")
 
 DATA_FILE  = os.path.join(SCRATCH_DIR, "data", "fashion-mnist-784-euclidean.hdf5")
-OUTPUT_SCATTER = "/global/homes/a/asv48/rolodex/fashion_mnist_tsne.png"
-OUTPUT_GALLERY = "/global/homes/a/asv48/rolodex/fashion_mnist_gallery.png"
+PLOTS_DIR = Path(__file__).resolve().parent / "plots"
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_SCATTER = str(PLOTS_DIR / "fashion_mnist_tsne.png")
+OUTPUT_GALLERY = str(PLOTS_DIR / "fashion_mnist_gallery.png")
 N_CLUSTERS = 10
 N_TSNE     = 5000   # points fed to t-SNE
 N_KMEANS   = 20000  # points used to fit k-means

@@ -2,7 +2,9 @@
 
 module load cray-hdf5 PrgEnv-gnu
 
-cd "$(dirname "$0")/build"
+source "$(dirname "$(readlink -f "$0")")/utils.sh"
+cd "$BUILD_DIR"
+
 make knn
 
 # Implementation (Serial vs OpenMP) is selected in src/knn_main.cpp RunConfig.
@@ -18,4 +20,4 @@ make knn
 
     echo "=== same binary, OMP_NUM_THREADS=8 ==="
     { time OMP_NUM_THREADS=8 ./knn; }
-} 2>&1 | tee ../comparison.out
+} 2>&1 | tee ./comparison.out
