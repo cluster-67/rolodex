@@ -80,6 +80,7 @@ class MPIKMeans : public KNNAlgorithm {
     int rank_;
     int size_;
     int global_n_;
+    int global_offset_;
 
     std::vector<TVector> local_points_;
     std::vector<int> local_membership_;
@@ -88,6 +89,11 @@ class MPIKMeans : public KNNAlgorithm {
     void update_centroids();
     int find_nearest_centroid(const TVector &point) const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
+
+    static const char *debug_root_dir();
+    bool ensure_debug_root_dir() const;
+    std::string build_debug_snapshot_path(int iteration, bool is_final) const;
+    void save_debug_snapshot(int iteration, bool is_final) const;
 
   public:
     MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size);

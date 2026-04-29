@@ -2,12 +2,36 @@
 
 #include "rolodex/distance.hpp"
 
+#include <H5Cpp.h>
 #include <algorithm>
+#include <cerrno>
+#include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <sys/stat.h>
+
+namespace {
+
+void write_i32_attr(H5::H5Object &obj, const char *name, int32_t value) {
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, H5::PredType::STD_I32LE, scalar);
+    attr.write(H5::PredType::STD_I32LE, &value);
+}
+
+void write_str_attr(H5::H5Object &obj, const char *name, const std::string &value) {
+    H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+    H5::DataSpace scalar(H5S_SCALAR);
+    H5::Attribute attr = obj.createAttribute(name, str_type, scalar);
+    attr.write(str_type, value);
+}
+
+} // namespace
 
 MPIKMeans::MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size)
-    : KNNAlgorithm(dataset, num_clusters, cache_enabled), rank_(rank), size_(size), global_n_(0) {}
+    : KNNAlgorithm(dataset, num_clusters, cache_enabled), rank_(rank), size_(size), global_n_(0),
+      global_offset_(0) {}
 
 void MPIKMeans::create_clusters(int update_frequency) {
     (void)update_frequency;
@@ -57,6 +81,7 @@ void MPIKMeans::create_clusters(int update_frequency) {
         displs[static_cast<std::size_t>(r)] =
             displs[static_cast<std::size_t>(r - 1)] + counts[static_cast<std::size_t>(r - 1)];
     }
+    global_offset_ = displs[static_cast<std::size_t>(rank_)] / D;
 
     const int local_n = counts[static_cast<std::size_t>(rank_)] / D;
     std::vector<float> local_flat(static_cast<std::size_t>(local_n * D));
@@ -111,8 +136,13 @@ void MPIKMeans::create_clusters(int update_frequency) {
 
         const float change_ratio =
             static_cast<float>(global_changes) / static_cast<float>(global_n_);
+        const bool converged = (iters >= max_iters || change_ratio < convergence_threshold);
 
-        if (iters >= max_iters || change_ratio < convergence_threshold) {
+        if (iters % 2 == 0 || converged) {
+            save_debug_snapshot(iters, converged);
+        }
+
+        if (converged) {
             break;
         }
 
@@ -227,4 +257,80 @@ std::vector<int> MPIKMeans::find_nearest_points(int centroid_idx, int top_k) con
         }
     }
     return nearest_points_indices;
+}
+
+const char *MPIKMeans::debug_root_dir() { return "data/debug/mpi"; }
+
+bool MPIKMeans::ensure_debug_root_dir() const {
+    mkdir("data", 0755);
+    mkdir("data/debug", 0755);
+    const int rc = mkdir(debug_root_dir(), 0755);
+    return rc == 0 || errno == EEXIST;
+}
+
+std::string MPIKMeans::build_debug_snapshot_path(int iteration, bool is_final) const {
+    std::ostringstream oss;
+    oss << debug_root_dir() << "/mpi_rank_" << rank_ << "_iter_"
+        << std::setw(6) << std::setfill('0') << iteration;
+    if (is_final) oss << "_final";
+    oss << ".h5";
+    return oss.str();
+}
+
+void MPIKMeans::save_debug_snapshot(int iteration, bool is_final) const {
+    if (!ensure_debug_root_dir()) {
+        std::cerr << "[debug] Warning: failed to create debug dir '" << debug_root_dir()
+                  << "': errno=" << errno << '\n';
+        return;
+    }
+
+    const int local_n = static_cast<int>(local_membership_.size());
+    const int dim = static_cast<int>(centroids_[0].size());
+    const std::string path = build_debug_snapshot_path(iteration, is_final);
+
+    try {
+        H5::H5File out(path.c_str(), H5F_ACC_TRUNC);
+        write_i32_attr(out, "format_version", 1);
+        write_str_attr(out, "algorithm", std::string("mpi"));
+        write_i32_attr(out, "iteration", static_cast<int32_t>(iteration));
+        write_i32_attr(out, "is_final", is_final ? 1 : 0);
+        write_i32_attr(out, "num_clusters", static_cast<int32_t>(num_clusters_));
+        write_i32_attr(out, "rank", static_cast<int32_t>(rank_));
+        write_i32_attr(out, "num_ranks", static_cast<int32_t>(size_));
+        write_i32_attr(out, "global_offset", static_cast<int32_t>(global_offset_));
+        write_i32_attr(out, "local_n", static_cast<int32_t>(local_n));
+        write_i32_attr(out, "global_n", static_cast<int32_t>(global_n_));
+
+        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
+        for (int c = 0; c < num_clusters_; ++c) {
+            const std::size_t base = static_cast<std::size_t>(c) * dim;
+            for (int d = 0; d < dim; ++d) {
+                centroid_raw[base + static_cast<std::size_t>(d)] =
+                    centroids_[static_cast<std::size_t>(c)][static_cast<std::size_t>(d)];
+            }
+        }
+        hsize_t centroid_dims[2] = {static_cast<hsize_t>(num_clusters_),
+                                    static_cast<hsize_t>(dim)};
+        H5::DataSpace centroid_space(2, centroid_dims);
+        H5::DataSet centroid_ds =
+            out.createDataSet("centroids", H5::PredType::IEEE_F32LE, centroid_space);
+        centroid_ds.write(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
+
+        std::vector<int32_t> serialized_membership(static_cast<std::size_t>(local_n));
+        for (int i = 0; i < local_n; ++i) {
+            serialized_membership[static_cast<std::size_t>(i)] =
+                static_cast<int32_t>(local_membership_[static_cast<std::size_t>(i)]);
+        }
+        hsize_t membership_dims[1] = {static_cast<hsize_t>(local_n)};
+        H5::DataSpace membership_space(1, membership_dims);
+        H5::DataSet membership_ds =
+            out.createDataSet("membership", H5::PredType::STD_I32LE, membership_space);
+        membership_ds.write(serialized_membership.data(), H5::PredType::NATIVE_INT32);
+    } catch (const H5::Exception &) {
+        std::cerr << "[debug] Warning: failed while writing MPI debug snapshot: " << path << '\n';
+        return;
+    }
+
+    std::cout << "[debug] Saved MPI snapshot: rank=" << rank_ << " iteration=" << iteration
+              << " final=" << (is_final ? 1 : 0) << " path=" << path << '\n';
 }
