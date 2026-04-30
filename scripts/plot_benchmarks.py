@@ -17,6 +17,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 import pandas as pd
 import seaborn as sns
@@ -65,6 +66,52 @@ def build_series_palette(series_order: list[str]) -> dict[str, tuple[float, floa
 def get_x_tick_fontsize(series_count: int) -> float:
     # Shrink labels as categories grow while keeping them readable.
     return max(6.0, min(11.0, 12.0 - (series_count * 0.3)))
+
+
+def write_legend_image(
+    series_order: list[str],
+    series_palette: dict[str, tuple[float, float, float]],
+    output_path: Path,
+) -> None:
+    if not series_order:
+        print(f"warning: no series found for legend {output_path.name}")
+        return
+
+    serial_series = [s for s in series_order if s == "Serial"]
+    openmp_series = [s for s in series_order if s.startswith("OpenMP")]
+    mpi_series = [s for s in series_order if s.startswith("MPI")]
+    grouped_series = [
+        ("Serial", serial_series),
+        ("OpenMP", openmp_series),
+        ("MPI", mpi_series),
+    ]
+
+    max_items = max(1, max(len(items) for _, items in grouped_series))
+    fig_height = max(2.2, 0.6 * (max_items + 1))
+    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, fig_height))
+    axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
+
+    for ax, (group_name, items) in zip(axes_flat, grouped_series):
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        ax.text(0.05, 0.93, group_name, fontsize=11, fontweight="semibold", ha="left", va="top")
+
+        if not items:
+            ax.text(0.05, 0.80, "-", fontsize=10, color="#666666", ha="left", va="top")
+            continue
+
+        row_step = 0.74 / max_items
+        y = 0.80
+        for series in items:
+            color = series_palette[series]
+            ax.add_patch(Rectangle((0.05, y - 0.03), 0.05, 0.05, facecolor=color, edgecolor="none"))
+            ax.text(0.13, y, series, fontsize=10, ha="left", va="center")
+            y -= row_step
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
 
 
 def parse_args() -> argparse.Namespace:
@@ -165,7 +212,13 @@ def collect_records(logs_dir: Path) -> tuple[list[dict[str, object]], list[dict[
     return build_records, latency_records
 
 
-def plot_metric(records: list[dict[str, object]], title: str, output_path: Path) -> None:
+def plot_metric(
+    records: list[dict[str, object]],
+    title: str,
+    output_path: Path,
+    series_order: list[str],
+    series_palette: dict[str, tuple[float, float, float]],
+) -> None:
     if not records:
         print(f"warning: no data found for plot {output_path.name}")
         return
@@ -173,8 +226,7 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
     sns.set_theme(style="whitegrid", context="talk")
     df = pd.DataFrame(records)
     datasets = sorted(df["dataset"].unique())
-    series_in_data = get_series_order(list(df["series"].unique()))
-    series_palette = build_series_palette(series_in_data)
+    series_in_data = [s for s in series_order if any(df["series"] == s)]
 
     ncols = max(1, len(datasets))
     nrows = 1
@@ -296,23 +348,33 @@ def main() -> int:
     print(f"Using logs directory: {logs_dir}")
 
     build_records, latency_records = collect_records(logs_dir)
+    all_series_values = [str(r["series"]) for r in (build_records + latency_records)]
+    series_order = get_series_order(sorted(set(all_series_values)))
+    series_palette = build_series_palette(series_order)
 
     build_plot = logs_dir / "cluster_build_time_ms.png"
     latency_plot = logs_dir / "query_latency_mean_ms.png"
+    legend_plot = logs_dir / "series_legend.png"
 
     plot_metric(
         build_records,
         title="Cluster Build Time by Dataset",
         output_path=build_plot,
+        series_order=series_order,
+        series_palette=series_palette,
     )
     plot_metric(
         latency_records,
         title="Query Mean Latency by Dataset",
         output_path=latency_plot,
+        series_order=series_order,
+        series_palette=series_palette,
     )
+    write_legend_image(series_order=series_order, series_palette=series_palette, output_path=legend_plot)
 
     print(f"Wrote plot: {build_plot}")
     print(f"Wrote plot: {latency_plot}")
+    print(f"Wrote plot: {legend_plot}")
     return 0
 
 
