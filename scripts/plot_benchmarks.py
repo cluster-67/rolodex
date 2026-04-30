@@ -77,39 +77,42 @@ def write_legend_image(
         print(f"warning: no series found for legend {output_path.name}")
         return
 
-    serial_series = [s for s in series_order if s == "Serial"]
-    openmp_series = [s for s in series_order if s.startswith("OpenMP")]
-    mpi_series = [s for s in series_order if s.startswith("MPI")]
-    grouped_series = [
-        ("Serial", serial_series),
-        ("OpenMP", openmp_series),
-        ("MPI", mpi_series),
-    ]
+    fig_width = max(12.0, 1.7 * len(series_order))
+    fig_height = 1.8
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    ax.set_xlim(-0.5, len(series_order) - 0.5)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
 
-    max_items = max(1, max(len(items) for _, items in grouped_series))
-    fig_height = max(2.2, 0.6 * (max_items + 1))
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, fig_height))
-    axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
+    swatch_width = 0.90
+    swatch_height = 0.36
+    swatch_y = 0.60
+    label_y = 0.38
 
-    for ax, (group_name, items) in zip(axes_flat, grouped_series):
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.axis("off")
-        ax.text(0.05, 0.93, group_name, fontsize=11, fontweight="semibold", ha="left", va="top")
+    for idx, series in enumerate(series_order):
+        color = series_palette[series]
+        ax.add_patch(
+            Rectangle(
+                (idx - swatch_width / 2.0, swatch_y),
+                swatch_width,
+                swatch_height,
+                facecolor=color,
+                edgecolor="none",
+            )
+        )
+        ax.text(
+            idx,
+            label_y,
+            series,
+            ha="right",
+            va="top",
+            fontsize=18,
+            rotation=40,
+            rotation_mode="anchor",
+            fontweight="bold",
+        )
 
-        if not items:
-            ax.text(0.05, 0.80, "-", fontsize=10, color="#666666", ha="left", va="top")
-            continue
-
-        row_step = 0.74 / max_items
-        y = 0.80
-        for series in items:
-            color = series_palette[series]
-            ax.add_patch(Rectangle((0.05, y - 0.03), 0.05, 0.05, facecolor=color, edgecolor="none"))
-            ax.text(0.13, y, series, fontsize=10, ha="left", va="center")
-            y -= row_step
-
-    fig.tight_layout()
+    fig.tight_layout(pad=0.2)
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
@@ -228,9 +231,9 @@ def plot_metric(
     datasets = sorted(df["dataset"].unique())
     series_in_data = [s for s in series_order if any(df["series"] == s)]
 
-    ncols = max(1, len(datasets))
-    nrows = 1
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(7 * ncols, 6))
+    ncols = 2
+    nrows = max(1, math.ceil(len(datasets) / ncols))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 3.2 * nrows))
     axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
 
     for idx, dataset in enumerate(datasets):
