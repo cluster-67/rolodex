@@ -20,7 +20,6 @@ SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters, bool 
 }
 
 void SerialKNNAlgorithm::create_clusters(int update_frequency) {
-    (void)update_frequency;
     std::vector<TVector> &points = dataset_->get_points();
     if (points.empty() || num_clusters_ <= 0) {
         return;
@@ -56,7 +55,9 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
             break;
         }
 
-        update_centroids();
+        if (iters % update_frequency == 0) {
+            update_centroids();
+        }
     }
 
     if (cache_enabled_) {

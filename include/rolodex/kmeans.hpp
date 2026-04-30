@@ -21,7 +21,8 @@ class KNNAlgorithm {
     KNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled);
     virtual ~KNNAlgorithm() = default;
 
-    /** Serial ignores `update_frequency`; OpenMP uses it for centroid update cadence. */
+    /** Centroid updates run when `iter % update_frequency == 0` after membership assignment, unless
+     * membership changes are zero (then stop). */
     virtual void create_clusters(int update_frequency = 1) = 0;
 
     virtual QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const = 0;
@@ -80,6 +81,8 @@ class MPIKMeans : public KNNAlgorithm {
     int rank_;
     int size_;
     int global_n_;
+    /** Global point index of `local_points_[0]` in the full dataset ordering used at scatter. */
+    int global_point_offset_;
 
     std::vector<TVector> local_points_;
     std::vector<int> local_membership_;
@@ -94,4 +97,7 @@ class MPIKMeans : public KNNAlgorithm {
 
     void create_clusters(int update_frequency = 1) override;
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
+
+    /** Vector dimension (same as centroid width); valid after `create_clusters`. */
+    int vector_dim() const;
 };

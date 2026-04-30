@@ -12,6 +12,7 @@ make knn
 # Run: positional impl + flags
 ./knn serial
 ./knn openmp --update-frequency 1
+# Optional: --seed <u32> for deterministic centroid init (default 42)
 srun -n 8 ./knn mpi
 
 # Build and run from root dir

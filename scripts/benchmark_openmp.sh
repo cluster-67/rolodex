@@ -16,7 +16,7 @@ echo "threads=1  real=${real}" | tee -a "$OUT"
 echo "" | tee -a "$OUT"
 
 echo "=== OpenMP thread sweep (set RunImplementation::OpenMP in knn_main.cpp) ===" | tee -a "$OUT"
-echo "update_frequency is RunConfig.update_frequency in knn_main.cpp (no CLI yet)" | tee -a "$OUT"
+echo "Centroid cadence: pass --update-frequency to ./knn (all implementations)" | tee -a "$OUT"
 for threads in "${THREAD_COUNTS[@]}"; do
     real=$({ time OMP_NUM_THREADS=$threads ./knn > /dev/null; } 2>&1 | grep real | awk '{print $2}')
     echo "threads=${threads}  real=${real}" | tee -a "$OUT"

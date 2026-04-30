@@ -59,9 +59,6 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
         membership_[static_cast<std::size_t>(point_idx)] = c_idx;
     }
 
-    const int max_iters = 10000;
-    // Stop when fewer than 0.1% of points change membership in a round.
-    const float convergence_threshold = 0.001f;
     int iters = 0;
 
     while (true) {
@@ -84,10 +81,7 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
             save_debug_snapshot(iters, false);
         }
 
-        const float change_ratio =
-            static_cast<float>(membership_change_count) / static_cast<float>(points.size());
-
-        if (iters >= max_iters || change_ratio < convergence_threshold) {
+        if (membership_change_count == 0) {
             break;
         }
 

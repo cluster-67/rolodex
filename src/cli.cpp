@@ -58,6 +58,7 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     cfg.validation_count = 10;
     cfg.vector_match_eps = 1e-4f;
     cfg.debug_enabled = false;
+    cfg.seed = 42U;
 
     CLI::App app{"rolodex knn"};
 
@@ -76,8 +77,10 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
         ->default_val(cfg.top_k);
     app.add_option("--nprobe", cfg.nprobe, "Number of clusters to probe")->default_val(cfg.nprobe);
     app.add_option("--update-frequency", cfg.update_frequency,
-                   "OpenMP centroid update cadence (ignored for serial/mpi)")
+                   "Centroid update cadence: update when iter %% update_frequency == 0 (all impls)")
         ->default_val(cfg.update_frequency);
+    app.add_option("--seed", cfg.seed, "RNG seed for deterministic centroid initialization (srand)")
+        ->default_val(cfg.seed);
     app.add_flag("--cache", cfg.cache_enabled, "Enable cluster cache (disabled by default)");
     app.add_option("--validation-count", cfg.validation_count,
                    "Number of validation queries to load (-1 = all)")

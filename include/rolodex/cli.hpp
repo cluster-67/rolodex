@@ -13,7 +13,8 @@ enum class RunImplementation {
 
 struct RunConfig {
     RunImplementation implementation;
-    /** OpenMP centroid update cadence; ignored by Serial/MPI (current behavior). */
+    /** Centroid update cadence: update when `iter % update_frequency == 0` after a non-zero-change
+     * iteration (all implementations). */
     int update_frequency;
     /** Enables cluster cache load/save when supported by the implementation. */
     bool cache_enabled;
@@ -26,6 +27,8 @@ struct RunConfig {
     float vector_match_eps;
     /** Enables OpenMP cluster debug snapshots under data/debug. */
     bool debug_enabled;
+    /** RNG seed for deterministic centroid init (`srand`); used by serial, OpenMP, and MPI. */
+    unsigned int seed;
 };
 
 /** Bootstrap: determine whether argv requests MPI, without full parsing. */
