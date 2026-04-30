@@ -26,22 +26,8 @@ FLOAT_RE = r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
 BUILD_TIME_RE = re.compile(rf"cluster_build_time_ms={FLOAT_RE}")
 MEAN_MS_RE = re.compile(rf"aggregate:\s+.*\bmean_ms={FLOAT_RE}")
 
-SERIES_ORDER = [
-    "Serial",
-    "OpenMP t=2",
-    "OpenMP t=4",
-    "OpenMP t=8",
-    "MPI N=1 n=2",
-    "MPI N=1 n=4",
-    "MPI N=1 n=8",
-    "MPI N=2 n=2",
-    "MPI N=2 n=4",
-    "MPI N=2 n=8",
-]
-SERIES_PALETTE = {
-    series: color
-    for series, color in zip(SERIES_ORDER, sns.color_palette("tab10", n_colors=len(SERIES_ORDER)))
-}
+OPENMP_SERIES_RE = re.compile(r"^OpenMP t=(\d+)$")
+MPI_SERIES_RE = re.compile(r"^MPI N=(\d+) n=(\d+)$")
 
 
 def choose_time_unit(max_ms: float) -> tuple[float, str, str]:
@@ -50,6 +36,35 @@ def choose_time_unit(max_ms: float) -> tuple[float, str, str]:
     if max_ms < 120_000:
         return 1_000.0, "Seconds (s)", "s"
     return 60_000.0, "Minutes (min)", "min"
+
+
+def series_sort_key(series: str) -> tuple[int, int, int]:
+    if series == "Serial":
+        return (0, 0, 0)
+
+    openmp_match = OPENMP_SERIES_RE.fullmatch(series)
+    if openmp_match:
+        return (1, int(openmp_match.group(1)), 0)
+
+    mpi_match = MPI_SERIES_RE.fullmatch(series)
+    if mpi_match:
+        return (2, int(mpi_match.group(1)), int(mpi_match.group(2)))
+
+    return (3, 0, 0)
+
+
+def get_series_order(series_values: list[str]) -> list[str]:
+    return sorted(series_values, key=series_sort_key)
+
+
+def build_series_palette(series_order: list[str]) -> dict[str, tuple[float, float, float]]:
+    colors = sns.color_palette("tab20", n_colors=max(1, len(series_order)))
+    return {series: color for series, color in zip(series_order, colors)}
+
+
+def get_x_tick_fontsize(series_count: int) -> float:
+    # Shrink labels as categories grow while keeping them readable.
+    return max(6.0, min(11.0, 12.0 - (series_count * 0.3)))
 
 
 def parse_args() -> argparse.Namespace:
@@ -158,7 +173,8 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
     sns.set_theme(style="whitegrid", context="talk")
     df = pd.DataFrame(records)
     datasets = sorted(df["dataset"].unique())
-    series_in_data = [s for s in SERIES_ORDER if any(df["series"] == s)]
+    series_in_data = get_series_order(list(df["series"].unique()))
+    series_palette = build_series_palette(series_in_data)
 
     ncols = max(1, len(datasets))
     nrows = 1
@@ -179,7 +195,7 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
             hue="series",
             order=series_in_data,
             hue_order=series_in_data,
-            palette=SERIES_PALETTE,
+            palette=series_palette,
             estimator="mean",
             errorbar=None,
             dodge=False,
@@ -253,9 +269,11 @@ def plot_metric(records: list[dict[str, object]], title: str, output_path: Path)
                 fontweight="semibold",
             )
         ax.tick_params(axis="x", labelrotation=40)
+        x_tick_fontsize = get_x_tick_fontsize(len(series_in_data))
         for tick_label in ax.get_xticklabels():
             tick_label.set_horizontalalignment("right")
             tick_label.set_rotation_mode("anchor")
+            tick_label.set_fontsize(x_tick_fontsize)
 
     for idx in range(len(datasets), len(axes_flat)):
         axes_flat[idx].axis("off")

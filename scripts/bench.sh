@@ -23,7 +23,7 @@ for dataset in fashion-mnist mnist sift gist; do
     "$BUILD_DIR/knn" "serial" --dataset "$dataset" 2>&1 | tee "$LOGS_DIR/$dataset/serial.log"
 
     color_echo "yellow" "Running knn with openmp for dataset=$dataset"
-    for threads in 2 4 8; do
+    for threads in 2 4 8 16 32; do
         color_echo "yellow" "Running knn with openmp threads=$threads for dataset=$dataset"
         OMP_NUM_THREADS=$threads "$BUILD_DIR/knn" openmp --dataset "$dataset" 2>&1 | tee "$LOGS_DIR/$dataset/openmp-t$threads.log"
     done
@@ -33,11 +33,17 @@ for dataset in fashion-mnist mnist sift gist; do
         "-N 1 -n 2"
         "-N 1 -n 4"
         "-N 1 -n 8"
+        "-N 1 -n 16"
+        "-N 1 -n 32"
         "-N 2 -n 2"
         "-N 2 -n 4"
         "-N 2 -n 8"
-        # "-N 4 -n 4"
-        # "-N 4 -n 8"
+        "-N 2 -n 16"
+        "-N 2 -n 32"
+        "-N 4 -n 4"
+        "-N 4 -n 8"
+        "-N 4 -n 16"
+        "-N 4 -n 32"
     )
 
     for run_config in "${run_configs[@]}"; do
