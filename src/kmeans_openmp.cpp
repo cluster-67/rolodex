@@ -9,8 +9,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <omp.h>
 #include <sstream>
+#include <utility>
 
 namespace {
 
@@ -42,20 +44,24 @@ void write_str_attr(H5::H5Object &obj, const char *name, const std::string &valu
 OpenMPKNNAlgorithm::OpenMPKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled,
                                        bool debug_enabled)
     : KNNAlgorithm(dataset, num_clusters, cache_enabled), debug_enabled_(debug_enabled) {
-    centroids_.resize(static_cast<std::size_t>(num_clusters_));
-    membership_.resize(dataset_->get_points().size(), -1);
+    dimension_ = dataset_->dim();
+    flat_centroids_.resize(static_cast<std::size_t>(num_clusters_) * dimension_);
+    membership_.resize(dataset_->n_points(), -1);
 }
 
 void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
-    std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty() || num_clusters_ <= 0) {
+    const float *points_flat = dataset_->get_flat();
+    const std::size_t num_points = dataset_->n_points();
+    if (num_points == 0 || num_clusters_ <= 0) {
         return;
     }
 
     // Step 1: Main thread randomly picks K initial centroids.
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
-        const int point_idx = static_cast<int>(rand() % points.size());
-        centroids_[static_cast<std::size_t>(c_idx)] = points[static_cast<std::size_t>(point_idx)];
+        const int point_idx = static_cast<int>(rand() % num_points);
+        std::copy(points_flat + point_idx * dimension_,
+                  points_flat + point_idx * dimension_ + dimension_,
+                  flat_centroids_.data() + static_cast<std::size_t>(c_idx) * dimension_);
         membership_[static_cast<std::size_t>(point_idx)] = c_idx;
     }
 
@@ -66,8 +72,8 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
         int membership_change_count = 0;
 
 #pragma omp parallel for schedule(static) reduction(+ : membership_change_count)
-        for (std::size_t point_idx = 0; point_idx < points.size(); point_idx++) {
-            const int nearest = find_nearest_centroid(points[point_idx]);
+        for (std::size_t point_idx = 0; point_idx < num_points; point_idx++) {
+            const int nearest = find_nearest_centroid(points_flat + point_idx * dimension_);
             if (membership_[point_idx] != nearest) {
                 membership_[point_idx] = nearest;
                 membership_change_count++;
@@ -96,59 +102,74 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
 }
 
 void OpenMPKNNAlgorithm::update_centroids() {
-    std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty()) {
+    const float *points_flat = dataset_->get_flat();
+    const std::size_t num_points = dataset_->n_points();
+    if (num_points == 0) {
         return;
     }
 
-    const std::size_t dim = points[0].size();
     const int max_threads = omp_get_max_threads();
+    const std::size_t cluster_stride = static_cast<std::size_t>(num_clusters_) * dimension_;
 
-    std::vector<std::vector<TVector>> local_sums(
-        static_cast<std::size_t>(max_threads),
-        std::vector<TVector>(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f)));
-    std::vector<std::vector<float>> local_counts(
-        static_cast<std::size_t>(max_threads),
-        std::vector<float>(static_cast<std::size_t>(num_clusters_), 0.0f));
+    std::vector<float> local_sums(static_cast<std::size_t>(max_threads) * cluster_stride, 0.0f);
+    std::vector<float> local_counts(
+        static_cast<std::size_t>(max_threads) * static_cast<std::size_t>(num_clusters_), 0.0f);
 
 #pragma omp parallel
     {
         const int tid = omp_get_thread_num();
+        const std::size_t thread_sum_base = static_cast<std::size_t>(tid) * cluster_stride;
+        const std::size_t thread_count_base =
+            static_cast<std::size_t>(tid) * static_cast<std::size_t>(num_clusters_);
 #pragma omp for schedule(static)
-        for (std::size_t point_idx = 0; point_idx < points.size(); point_idx++) {
+        for (std::size_t point_idx = 0; point_idx < num_points; point_idx++) {
             const std::size_t c = static_cast<std::size_t>(membership_[point_idx]);
-            for (std::size_t i = 0; i < dim; i++) {
-                local_sums[static_cast<std::size_t>(tid)][c][i] += points[point_idx][i];
+            const std::size_t c_base = thread_sum_base + c * dimension_;
+            const std::size_t p_base = point_idx * dimension_;
+            for (std::size_t i = 0; i < dimension_; i++) {
+                local_sums[c_base + i] += points_flat[p_base + i];
             }
-            local_counts[static_cast<std::size_t>(tid)][c] += 1.0f;
+            local_counts[thread_count_base + c] += 1.0f;
         }
     }
 
-    for (std::size_t c = 0; c < static_cast<std::size_t>(num_clusters_); c++) {
-        TVector global_sum(dim, 0.0f);
+#pragma omp parallel for schedule(static)
+    for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
+        const std::size_t c = static_cast<std::size_t>(c_idx);
         float global_count = 0.0f;
-
         for (int t = 0; t < max_threads; t++) {
-            const std::size_t ti = static_cast<std::size_t>(t);
-            for (std::size_t i = 0; i < dim; i++) {
-                global_sum[i] += local_sums[ti][c][i];
-            }
-            global_count += local_counts[ti][c];
+            global_count +=
+                local_counts[static_cast<std::size_t>(t) * static_cast<std::size_t>(num_clusters_) + c];
         }
 
         if (global_count > 0.0f) {
-            for (std::size_t i = 0; i < dim; i++) {
-                centroids_[c][i] = global_sum[i] / global_count;
+            const float inv_count = 1.0f / global_count;
+            const std::size_t centroid_base = c * dimension_;
+#pragma omp simd
+            for (std::size_t i = 0; i < dimension_; i++) {
+                float global_sum = 0.0f;
+                for (int t = 0; t < max_threads; t++) {
+                    global_sum += local_sums[static_cast<std::size_t>(t) * cluster_stride +
+                                             centroid_base + i];
+                }
+                flat_centroids_[centroid_base + i] = global_sum * inv_count;
             }
         }
     }
 }
 
-int OpenMPKNNAlgorithm::find_nearest_centroid(const TVector &point) const {
+int OpenMPKNNAlgorithm::find_nearest_centroid(const float *point) const {
     int nearest_centroid_idx = 0;
-    float nearest_sq = squared_l2(point, centroids_[0]);
-    for (int c_idx = 1; c_idx < num_clusters_; c_idx++) {
-        const float d = squared_l2(point, centroids_[static_cast<std::size_t>(c_idx)]);
+    float nearest_sq = std::numeric_limits<float>::max();
+    for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
+        const float *centroid =
+            flat_centroids_.data() + static_cast<std::size_t>(c_idx) * dimension_;
+        float d = 0.0f;
+#pragma omp simd reduction(+ : d)
+        for (std::size_t i = 0; i < dimension_; i++) {
+            const float diff = point[i] - centroid[i];
+            d += diff * diff;
+        }
         if (d < nearest_sq) {
             nearest_sq = d;
             nearest_centroid_idx = c_idx;
@@ -158,8 +179,9 @@ int OpenMPKNNAlgorithm::find_nearest_centroid(const TVector &point) const {
 }
 
 QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, int nprobe) const {
-    const std::vector<TVector> &pts = dataset_->get_points();
-    if (pts.empty() || top_k <= 0 || num_clusters_ <= 0) {
+    const float *pts_flat = dataset_->get_flat();
+    const std::size_t num_points = dataset_->n_points();
+    if (num_points == 0 || top_k <= 0 || num_clusters_ <= 0) {
         return QueryResult{};
     }
 
@@ -168,7 +190,11 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     std::vector<std::pair<float, int>> centroid_dists;
     centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
     for (int c = 0; c < num_clusters_; ++c) {
-        centroid_dists.emplace_back(squared_l2(query, centroids_[static_cast<std::size_t>(c)]), c);
+        centroid_dists.emplace_back(
+            squared_l2(query.data(),
+                       flat_centroids_.data() + static_cast<std::size_t>(c) * dimension_,
+                       dimension_),
+            c);
     }
     std::sort(centroid_dists.begin(), centroid_dists.end(),
               [](const std::pair<float, int> &a, const std::pair<float, int> &b) {
@@ -194,7 +220,8 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     std::vector<std::pair<float, std::size_t>> scored;
     scored.reserve(candidate_indices.size());
     for (std::size_t idx : candidate_indices) {
-        scored.emplace_back(squared_l2(query, pts[idx]), idx);
+        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_),
+                            idx);
     }
 
     const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
@@ -211,7 +238,11 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     result.neighbors.reserve(k_out);
     result.distances.reserve(k_out);
     for (std::size_t i = 0; i < k_out; ++i) {
-        result.neighbors.push_back(pts[scored[i].second]);
+        const std::size_t gidx = scored[i].second;
+        TVector neighbor(dimension_);
+        std::copy(pts_flat + gidx * dimension_, pts_flat + gidx * dimension_ + dimension_,
+                  neighbor.begin());
+        result.neighbors.push_back(std::move(neighbor));
         result.distances.push_back(scored[i].first);
     }
     return result;
@@ -220,8 +251,8 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
 std::vector<int> OpenMPKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) const {
     (void)top_k;
     std::vector<int> nearest_points_indices;
-    const std::vector<TVector> &pts = dataset_->get_points();
-    for (std::size_t i = 0; i < pts.size(); i++) {
+    const std::size_t num_points = dataset_->n_points();
+    for (std::size_t i = 0; i < num_points; i++) {
         if (membership_[i] == centroid_idx) {
             nearest_points_indices.push_back(static_cast<int>(i));
         }
@@ -255,12 +286,11 @@ void OpenMPKNNAlgorithm::save_debug_snapshot(int iteration, bool is_final) const
         return;
     }
 
-    const std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty()) {
+    const std::size_t num_points = dataset_->n_points();
+    const std::size_t dim = dataset_->dim();
+    if (num_points == 0 || dim == 0) {
         return;
     }
-    const std::size_t num_points = points.size();
-    const std::size_t dim = points[0].size();
     const std::string path = build_debug_snapshot_path(iteration, is_final);
 
     try {
@@ -274,18 +304,11 @@ void OpenMPKNNAlgorithm::save_debug_snapshot(int iteration, bool is_final) const
         write_u64_attr(out, "num_points", static_cast<uint64_t>(num_points));
         write_u64_attr(out, "dim", static_cast<uint64_t>(dim));
 
-        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
-        for (int c = 0; c < num_clusters_; ++c) {
-            const std::size_t base = static_cast<std::size_t>(c) * dim;
-            for (std::size_t j = 0; j < dim; ++j) {
-                centroid_raw[base + j] = centroids_[static_cast<std::size_t>(c)][j];
-            }
-        }
         hsize_t centroid_dims[2] = {static_cast<hsize_t>(num_clusters_), static_cast<hsize_t>(dim)};
         H5::DataSpace centroid_space(2, centroid_dims);
         H5::DataSet centroid_ds =
             out.createDataSet("centroids", H5::PredType::IEEE_F32LE, centroid_space);
-        centroid_ds.write(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
+        centroid_ds.write(flat_centroids_.data(), H5::PredType::NATIVE_FLOAT);
 
         std::vector<int32_t> serialized_membership(num_points);
         for (std::size_t i = 0; i < num_points; ++i) {

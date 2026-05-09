@@ -73,7 +73,7 @@ class Dataset {
 
   private:
     std::string filename_;
-    std::vector<float> data_; // flat row-major primary storage
+    TAlignedVector data_; // flat row-major primary storage
     std::size_t nrows_ = 0;
     std::size_t ncols_ = 0;
     std::vector<TVector> points_cache_; // populated on demand by get_points()

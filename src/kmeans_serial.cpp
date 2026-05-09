@@ -12,16 +12,22 @@
 #include <string>
 #include <sys/stat.h>
 #include <utility>
+#include <limits>
 
 SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled)
     : KNNAlgorithm(dataset, num_clusters, cache_enabled) {
-    centroids_.resize(static_cast<std::size_t>(num_clusters_));
-    membership_.resize(dataset_->get_points().size(), -1);
+    dimension_ = dataset_->dim();
+    flat_centroids_.resize(static_cast<std::size_t>(num_clusters_) * dimension_);
+    centroid_sums_.resize(static_cast<std::size_t>(num_clusters_) * dimension_);
+    centroid_counts_.resize(static_cast<std::size_t>(num_clusters_));
+    membership_.resize(dataset_->n_points(), -1);
 }
 
 void SerialKNNAlgorithm::create_clusters(int update_frequency) {
-    std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty() || num_clusters_ <= 0) {
+    const float *points_flat = dataset_->get_flat();
+    const std::size_t num_points = dataset_->n_points();
+
+    if (num_points == 0 || num_clusters_ <= 0) {
         return;
     }
 
@@ -31,8 +37,10 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
     }
 
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
-        const int point_idx = static_cast<int>(rand() % points.size());
-        centroids_[static_cast<std::size_t>(c_idx)] = points[static_cast<std::size_t>(point_idx)];
+        const int point_idx = static_cast<int>(rand() % num_points);
+        std::copy(points_flat + point_idx * dimension_,
+                  points_flat + point_idx * dimension_ + dimension_,
+                  flat_centroids_.data() + c_idx * dimension_);
         membership_[static_cast<std::size_t>(point_idx)] = c_idx;
     }
 
@@ -40,8 +48,8 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
     while (true) {
         iters++;
         int membership_change_count = 0;
-        for (std::size_t point_idx = 0; point_idx < points.size(); point_idx++) {
-            int nearest_centroid_idx = find_nearest_centroid(points[point_idx]);
+        for (std::size_t point_idx = 0; point_idx < num_points; point_idx++) {
+            int nearest_centroid_idx = find_nearest_centroid(points_flat + point_idx * dimension_);
             int prev_membership = membership_[point_idx];
             if (prev_membership != nearest_centroid_idx) {
                 membership_[point_idx] = nearest_centroid_idx;
@@ -66,52 +74,73 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
 }
 
 void SerialKNNAlgorithm::update_centroids() {
-    std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty()) {
+    const float *points_flat = dataset_->get_flat();
+    const std::size_t num_points = dataset_->n_points();
+
+    if (num_points == 0) {
         return;
     }
 
-    const std::size_t dim = points[0].size();
-    std::vector<TVector> centroid_sums(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f));
-    std::vector<float> centroid_counts(static_cast<std::size_t>(num_clusters_), 0.0f);
+    // 1. Reset existing buffers instead of re-allocating
+    std::fill(centroid_sums_.begin(), centroid_sums_.end(), 0.0f);
+    std::fill(centroid_counts_.begin(), centroid_counts_.end(), 0.0f);
 
-    for (std::size_t point_idx = 0; point_idx < points.size(); point_idx++) {
+    for (std::size_t point_idx = 0; point_idx < num_points; point_idx++) {
         const int centroid_idx = membership_[point_idx];
-        for (std::size_t i = 0; i < points[point_idx].size(); i++) {
-            centroid_sums[static_cast<std::size_t>(centroid_idx)][i] += points[point_idx][i];
+        const std::size_t c_base = static_cast<std::size_t>(centroid_idx) * dimension_;
+        const std::size_t p_base = point_idx * dimension_;
+
+        centroid_counts_[static_cast<std::size_t>(centroid_idx)] += 1.0f;
+        #pragma omp simd
+        for (std::size_t i = 0; i < dimension_; i++) {
+            centroid_sums_[c_base + i] += points_flat[p_base + i];
         }
-        centroid_counts[static_cast<std::size_t>(centroid_idx)] += 1.0f;
     }
 
+    // 3. Optimized Centroid Calculation
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
-        const float count = centroid_counts[static_cast<std::size_t>(c_idx)];
-        if (count <= 0.0f) {
-            continue;
+        const float count = centroid_counts_[static_cast<std::size_t>(c_idx)];
+        if (count > 0.0f) {
+            // THE OPTIMIZATION: Calculate reciprocal ONCE
+            const float inv_count = 1.0f / count;
+            const std::size_t base = static_cast<std::size_t>(c_idx) * dimension_;
+
+            // Use SIMD to multiply by the reciprocal
+            #pragma omp simd
+            for (std::size_t i = 0; i < dimension_; i++) {
+                flat_centroids_[base + i] = centroid_sums_[base + i] * inv_count;
+            }
         }
-        for (float &i : centroid_sums[static_cast<std::size_t>(c_idx)]) {
-            i /= count;
-        }
-        centroids_[static_cast<std::size_t>(c_idx)] =
-            centroid_sums[static_cast<std::size_t>(c_idx)];
     }
 }
 
-int SerialKNNAlgorithm::find_nearest_centroid(const TVector &point) const {
+int SerialKNNAlgorithm::find_nearest_centroid(const float *query_point) const {
     int nearest_centroid_idx = 0;
-    float nearest_sq = squared_l2(point, centroids_[0]);
-    for (int c_idx = 1; c_idx < num_clusters_; c_idx++) {
-        const float d = squared_l2(point, centroids_[static_cast<std::size_t>(c_idx)]);
-        if (d < nearest_sq) {
-            nearest_sq = d;
-            nearest_centroid_idx = c_idx;
+    float min_sq_dist = std::numeric_limits<float>::max();
+
+    for (int c = 0; c < num_clusters_; ++c) {
+        const float *target_centroid = &flat_centroids_[static_cast<std::size_t>(c) * dimension_];
+        float current_dist = 0;
+
+        #pragma omp simd reduction(+:current_dist)
+        for (size_t i = 0; i < dimension_; ++i) {
+            float diff = query_point[i] - target_centroid[i];
+            current_dist += diff * diff;
+        }
+
+        if (current_dist < min_sq_dist) {
+            min_sq_dist = current_dist;
+            nearest_centroid_idx = c;
         }
     }
     return nearest_centroid_idx;
 }
 
 QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, int nprobe) const {
-    const std::vector<TVector> &pts = dataset_->get_points();
-    if (pts.empty() || top_k <= 0 || num_clusters_ <= 0) {
+    const float *pts_flat = dataset_->get_flat();
+    const std::size_t num_points = dataset_->n_points();
+
+    if (num_points == 0 || top_k <= 0 || num_clusters_ <= 0) {
         return QueryResult{};
     }
 
@@ -120,7 +149,8 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     std::vector<std::pair<float, int>> centroid_dists;
     centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
     for (int c = 0; c < num_clusters_; ++c) {
-        centroid_dists.emplace_back(squared_l2(query, centroids_[static_cast<std::size_t>(c)]), c);
+        centroid_dists.emplace_back(
+            squared_l2(query.data(), &flat_centroids_[static_cast<std::size_t>(c) * dimension_], dimension_), c);
     }
     std::sort(centroid_dists.begin(), centroid_dists.end(),
               [](const std::pair<float, int> &a, const std::pair<float, int> &b) {
@@ -146,7 +176,8 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     std::vector<std::pair<float, std::size_t>> scored;
     scored.reserve(candidate_indices.size());
     for (std::size_t idx : candidate_indices) {
-        scored.emplace_back(squared_l2(query, pts[idx]), idx);
+        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_),
+                            idx);
     }
 
     const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
@@ -163,7 +194,11 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     result.neighbors.reserve(k_out);
     result.distances.reserve(k_out);
     for (std::size_t i = 0; i < k_out; ++i) {
-        result.neighbors.push_back(pts[scored[i].second]);
+        const std::size_t gidx = scored[i].second;
+        TVector neighbor(dimension_);
+        std::copy(pts_flat + gidx * dimension_, pts_flat + gidx * dimension_ + dimension_,
+                  neighbor.begin());
+        result.neighbors.push_back(std::move(neighbor));
         result.distances.push_back(scored[i].first);
     }
     return result;
@@ -172,8 +207,8 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
 std::vector<int> SerialKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) const {
     (void)top_k;
     std::vector<int> nearest_points_indices;
-    const std::vector<TVector> &pts = dataset_->get_points();
-    for (std::size_t i = 0; i < pts.size(); i++) {
+    const std::size_t num_points = dataset_->n_points();
+    for (std::size_t i = 0; i < num_points; i++) {
         if (membership_[i] == centroid_idx) {
             nearest_points_indices.push_back(static_cast<int>(i));
         }
@@ -234,13 +269,12 @@ std::string SerialKNNAlgorithm::get_cache_path() const {
 }
 
 bool SerialKNNAlgorithm::load_clusters_from_cache() {
-    const std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty() || num_clusters_ <= 0) {
+    const std::size_t num_points = dataset_->n_points();
+    const std::size_t dim = dataset_->dim();
+    if (num_points == 0 || dim == 0 || num_clusters_ <= 0) {
         return false;
     }
 
-    const std::size_t num_points = points.size();
-    const std::size_t dim = points[0].size();
     const std::string expected_basename = utils::cache::dataset_basename(dataset_);
     const std::string cache_path = get_cache_path();
 
@@ -278,17 +312,10 @@ bool SerialKNNAlgorithm::load_clusters_from_cache() {
         H5::DataSet centroids_ds = in.openDataSet("centroids");
         H5::DataSet membership_ds = in.openDataSet("membership");
 
-        centroids_.assign(static_cast<std::size_t>(num_clusters_), TVector(dim, 0.0f));
+        flat_centroids_.assign(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
         membership_.assign(num_points, -1);
 
-        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
-        centroids_ds.read(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
-        for (int c = 0; c < num_clusters_; ++c) {
-            const std::size_t base = static_cast<std::size_t>(c) * dim;
-            for (std::size_t j = 0; j < dim; ++j) {
-                centroids_[static_cast<std::size_t>(c)][j] = centroid_raw[base + j];
-            }
-        }
+        centroids_ds.read(flat_centroids_.data(), H5::PredType::NATIVE_FLOAT);
 
         std::vector<int32_t> serialized_membership(num_points);
         membership_ds.read(serialized_membership.data(), H5::PredType::NATIVE_INT32);
@@ -308,12 +335,11 @@ bool SerialKNNAlgorithm::load_clusters_from_cache() {
 }
 
 void SerialKNNAlgorithm::save_clusters_to_cache() const {
-    const std::vector<TVector> &points = dataset_->get_points();
-    if (points.empty() || num_clusters_ <= 0) {
+    const std::size_t num_points = dataset_->n_points();
+    const std::size_t dim = dataset_->dim();
+    if (num_points == 0 || dim == 0 || num_clusters_ <= 0) {
         return;
     }
-    const std::size_t num_points = points.size();
-    const std::size_t dim = points[0].size();
     const std::string dataset_basename = utils::cache::dataset_basename(dataset_);
 
     if (!ensure_cache_root_dir()) {
@@ -331,18 +357,11 @@ void SerialKNNAlgorithm::save_clusters_to_cache() const {
         write_u64_attr(out, "dim", static_cast<uint64_t>(dim));
         write_str_attr(out, "dataset_basename", dataset_basename);
 
-        std::vector<float> centroid_raw(static_cast<std::size_t>(num_clusters_) * dim, 0.0f);
-        for (int c = 0; c < num_clusters_; ++c) {
-            const std::size_t base = static_cast<std::size_t>(c) * dim;
-            for (std::size_t j = 0; j < dim; ++j) {
-                centroid_raw[base + j] = centroids_[static_cast<std::size_t>(c)][j];
-            }
-        }
         hsize_t centroid_dims[2] = {static_cast<hsize_t>(num_clusters_), static_cast<hsize_t>(dim)};
         H5::DataSpace centroid_space(2, centroid_dims);
         H5::DataSet centroid_ds =
             out.createDataSet("centroids", H5::PredType::IEEE_F32LE, centroid_space);
-        centroid_ds.write(centroid_raw.data(), H5::PredType::NATIVE_FLOAT);
+        centroid_ds.write(flat_centroids_.data(), H5::PredType::NATIVE_FLOAT);
 
         std::vector<int32_t> serialized_membership(num_points);
         for (std::size_t i = 0; i < num_points; ++i) {

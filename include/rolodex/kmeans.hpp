@@ -37,14 +37,17 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
 
     void update_centroids();
 
-    int find_nearest_centroid(const TVector &point) const;
+    int find_nearest_centroid(const float *query_point) const;
 
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 
   private:
-    std::vector<TVector> centroids_;
+    TAlignedVector flat_centroids_;
     std::vector<int> membership_;
+    TAlignedVector centroid_sums_;
+    TAlignedVector centroid_counts_;
     std::string get_cache_path() const;
+    std::size_t dimension_;
     bool load_clusters_from_cache();
     void save_clusters_to_cache() const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
@@ -64,11 +67,12 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
 
   private:
     static const char *debug_root_dir();
-    std::vector<TVector> centroids_;
+    std::vector<float> flat_centroids_;
     std::vector<int> membership_;
     bool debug_enabled_;
+    std::size_t dimension_;
 
-    int find_nearest_centroid(const TVector &point) const;
+    int find_nearest_centroid(const float *point) const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
     bool ensure_debug_root_dir() const;
     std::string build_debug_snapshot_path(int iteration, bool is_final) const;
@@ -84,12 +88,13 @@ class MPIKMeans : public KNNAlgorithm {
     /** Global point index of `local_points_[0]` in the full dataset ordering used at scatter. */
     int global_point_offset_;
 
-    std::vector<TVector> local_points_;
+    std::vector<float> local_points_flat_;
     std::vector<int> local_membership_;
-    std::vector<TVector> centroids_;
+    std::vector<float> flat_centroids_;
+    int dimension_;
 
     void update_centroids();
-    int find_nearest_centroid(const TVector &point) const;
+    int find_nearest_centroid(const float *point) const;
     std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 
   public:

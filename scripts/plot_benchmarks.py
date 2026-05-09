@@ -145,7 +145,7 @@ def resolve_logs_dir(logs_dir_arg: str | None) -> Path:
 
     bench_dirs = sorted(
         [p for p in logs_root.glob("bench-*") if p.is_dir()],
-        key=lambda p: p.name,
+        key=lambda p: p.stat().st_mtime,
     )
     if not bench_dirs:
         raise FileNotFoundError(f"No bench-* directories found under {logs_root}")
