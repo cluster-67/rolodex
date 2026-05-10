@@ -34,6 +34,12 @@ std::string dataset_path_from_name(const std::string &dataset_name) {
     if (dataset_name == "sift") {
         return utils::path::dataset_path("sift-128-euclidean.hdf5");
     }
+    if (dataset_name == "deep1b-10M") {
+        return utils::path::dataset_path("deep1b/deep1b-10M.hdf5");
+    }
+    if (dataset_name == "deep1b-1B") {
+        return utils::path::dataset_path("deep1b/deep1b-1B.hdf5");
+    }
     throw std::runtime_error("Invalid dataset '" + dataset_name +
                              "'. Expected one of: fashion-mnist, gist, mnist, sift.");
 }
@@ -142,6 +148,8 @@ int main(int argc, char **argv) {
             dataset_load_start, rolodex::timing::SteadyClock::now());
         std::cout << "train_dataset_load_time_ms=" << dataset_load_ms << '\n';
     }
+
+    return 0;
 
     std::unique_ptr<KNNAlgorithm> knn_algorithm;
     switch (cfg.implementation) {
