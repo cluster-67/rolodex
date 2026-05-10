@@ -6,9 +6,9 @@
 #include <cstddef>
 
 // Overload for serial: contiguous float pointers — compiler can auto-vectorize.
-inline float squared_l2(const float * __restrict a, const float * __restrict b, std::size_t n) {
+inline float squared_l2(const float *__restrict a, const float *__restrict b, std::size_t n) {
     float s = 0.0f;
-    #pragma omp simd reduction(+:s)
+#pragma omp simd reduction(+ : s)
     for (std::size_t i = 0; i < n; ++i) {
         const float d = a[i] - b[i];
         s += d * d;

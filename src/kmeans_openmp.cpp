@@ -139,7 +139,8 @@ void OpenMPKNNAlgorithm::update_centroids() {
         float global_count = 0.0f;
         for (int t = 0; t < max_threads; t++) {
             global_count +=
-                local_counts[static_cast<std::size_t>(t) * static_cast<std::size_t>(num_clusters_) + c];
+                local_counts[static_cast<std::size_t>(t) * static_cast<std::size_t>(num_clusters_) +
+                             c];
         }
 
         if (global_count > 0.0f) {
@@ -220,8 +221,7 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     std::vector<std::pair<float, std::size_t>> scored;
     scored.reserve(candidate_indices.size());
     for (std::size_t idx : candidate_indices) {
-        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_),
-                            idx);
+        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_), idx);
     }
 
     const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());

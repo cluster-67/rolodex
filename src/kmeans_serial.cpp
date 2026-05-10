@@ -9,10 +9,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <sys/stat.h>
 #include <utility>
-#include <limits>
 
 SerialKNNAlgorithm::SerialKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled)
     : KNNAlgorithm(dataset, num_clusters, cache_enabled) {
@@ -91,7 +91,7 @@ void SerialKNNAlgorithm::update_centroids() {
         const std::size_t p_base = point_idx * dimension_;
 
         centroid_counts_[static_cast<std::size_t>(centroid_idx)] += 1.0f;
-        #pragma omp simd
+#pragma omp simd
         for (std::size_t i = 0; i < dimension_; i++) {
             centroid_sums_[c_base + i] += points_flat[p_base + i];
         }
@@ -105,8 +105,8 @@ void SerialKNNAlgorithm::update_centroids() {
             const float inv_count = 1.0f / count;
             const std::size_t base = static_cast<std::size_t>(c_idx) * dimension_;
 
-            // Use SIMD to multiply by the reciprocal
-            #pragma omp simd
+// Use SIMD to multiply by the reciprocal
+#pragma omp simd
             for (std::size_t i = 0; i < dimension_; i++) {
                 flat_centroids_[base + i] = centroid_sums_[base + i] * inv_count;
             }
@@ -122,7 +122,7 @@ int SerialKNNAlgorithm::find_nearest_centroid(const float *query_point) const {
         const float *target_centroid = &flat_centroids_[static_cast<std::size_t>(c) * dimension_];
         float current_dist = 0;
 
-        #pragma omp simd reduction(+:current_dist)
+#pragma omp simd reduction(+ : current_dist)
         for (size_t i = 0; i < dimension_; ++i) {
             float diff = query_point[i] - target_centroid[i];
             current_dist += diff * diff;
@@ -150,7 +150,9 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
     for (int c = 0; c < num_clusters_; ++c) {
         centroid_dists.emplace_back(
-            squared_l2(query.data(), &flat_centroids_[static_cast<std::size_t>(c) * dimension_], dimension_), c);
+            squared_l2(query.data(), &flat_centroids_[static_cast<std::size_t>(c) * dimension_],
+                       dimension_),
+            c);
     }
     std::sort(centroid_dists.begin(), centroid_dists.end(),
               [](const std::pair<float, int> &a, const std::pair<float, int> &b) {
@@ -176,8 +178,7 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     std::vector<std::pair<float, std::size_t>> scored;
     scored.reserve(candidate_indices.size());
     for (std::size_t idx : candidate_indices) {
-        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_),
-                            idx);
+        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_), idx);
     }
 
     const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());

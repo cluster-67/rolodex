@@ -149,8 +149,6 @@ int main(int argc, char **argv) {
         std::cout << "train_dataset_load_time_ms=" << dataset_load_ms << '\n';
     }
 
-    return 0;
-
     std::unique_ptr<KNNAlgorithm> knn_algorithm;
     switch (cfg.implementation) {
     case rolodex::cli::RunImplementation::Serial:
