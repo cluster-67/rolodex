@@ -178,9 +178,10 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
         if (!probed[static_cast<std::size_t>(centroid_idx)]) {
             continue;
         }
-        const float dist =
-            squared_l2(query.data(), pts_flat + idx * dimension_, dimension_);
-        topk.maybe_push(dist, idx);
+        const float dist = squared_l2(query.data(), pts_flat + idx * dimension_, dimension_);
+        if (topk.would_accept(dist, idx)) {
+            topk.push_accepted(dist, idx);
+        }
     }
 
     std::vector<std::pair<float, std::size_t>> scored = topk.extract_sorted();

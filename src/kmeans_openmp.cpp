@@ -226,8 +226,7 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
 #pragma omp parallel
     {
         const int tid = omp_get_thread_num();
-        utils::knn::TopKAccumulator &local =
-            locals[static_cast<std::size_t>(tid)];
+        utils::knn::TopKAccumulator &local = locals[static_cast<std::size_t>(tid)];
 #pragma omp for schedule(static)
         for (std::size_t idx = 0; idx < num_points; ++idx) {
             const int centroid_idx = membership_[idx];
@@ -237,16 +236,19 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
             if (!probed[static_cast<std::size_t>(centroid_idx)]) {
                 continue;
             }
-            const float dist =
-                squared_l2(query.data(), pts_flat + idx * dimension_, dimension_);
-            local.maybe_push(dist, idx);
+            const float dist = squared_l2(query.data(), pts_flat + idx * dimension_, dimension_);
+            if (local.would_accept(dist, idx)) {
+                local.push_accepted(dist, idx);
+            }
         }
     }
 
     utils::knn::TopKAccumulator merged(k_cap);
     for (const auto &local : locals) {
         for (const auto &entry : local.entries_unsorted()) {
-            merged.maybe_push(entry.first, entry.second);
+            if (merged.would_accept(entry.first, entry.second)) {
+                merged.push_accepted(entry.first, entry.second);
+            }
         }
     }
 

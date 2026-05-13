@@ -45,7 +45,17 @@ class TopKAccumulator {
         return k_;
     }
 
-    void maybe_push(float dist, std::size_t idx) {
+    bool would_accept(float dist, std::size_t idx) const {
+        if (k_ == 0) {
+            return false;
+        }
+        if (heap_.size() < k_) {
+            return true;
+        }
+        return is_better(Entry(dist, idx), heap_.top());
+    }
+
+    void push_accepted(float dist, std::size_t idx) {
         if (k_ == 0) {
             return;
         }
@@ -54,10 +64,15 @@ class TopKAccumulator {
             heap_.push(candidate);
             return;
         }
-        if (is_better(candidate, heap_.top())) {
-            heap_.pop();
-            heap_.push(candidate);
+        heap_.pop();
+        heap_.push(candidate);
+    }
+
+    void maybe_push(float dist, std::size_t idx) {
+        if (!would_accept(dist, idx)) {
+            return;
         }
+        push_accepted(dist, idx);
     }
 
     std::vector<Entry> extract_sorted() const {

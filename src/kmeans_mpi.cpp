@@ -239,12 +239,13 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
         if (!probed[static_cast<std::size_t>(centroid_idx)]) {
             continue;
         }
-        const float d = squared_l2(
-            qbuf.data(), local_points_flat_.data() + liu * static_cast<std::size_t>(dim),
-            static_cast<std::size_t>(dim));
-        const std::size_t gidx =
-            static_cast<std::size_t>(global_point_offset_) + liu;
-        topk.maybe_push(d, gidx);
+        const float d =
+            squared_l2(qbuf.data(), local_points_flat_.data() + liu * static_cast<std::size_t>(dim),
+                       static_cast<std::size_t>(dim));
+        const std::size_t gidx = static_cast<std::size_t>(global_point_offset_) + liu;
+        if (topk.would_accept(d, gidx)) {
+            topk.push_accepted(d, gidx);
+        }
     }
 
     std::vector<std::pair<float, std::size_t>> scored = topk.extract_sorted();
@@ -298,8 +299,11 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
 
     utils::knn::TopKAccumulator merged_topk(static_cast<std::size_t>(tk));
     for (int i = 0; i < total_recv; ++i) {
-        merged_topk.maybe_push(alldist[static_cast<std::size_t>(i)],
-                               static_cast<std::size_t>(allg[static_cast<std::size_t>(i)]));
+        const float d = alldist[static_cast<std::size_t>(i)];
+        const std::size_t gidx = static_cast<std::size_t>(allg[static_cast<std::size_t>(i)]);
+        if (merged_topk.would_accept(d, gidx)) {
+            merged_topk.push_accepted(d, gidx);
+        }
     }
     std::vector<std::pair<float, std::size_t>> merged = merged_topk.extract_sorted();
     const std::size_t k_out = merged.size();
