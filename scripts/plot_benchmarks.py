@@ -2,9 +2,12 @@
 """
 Plot benchmark metrics from bench.sh output logs.
 
-Creates two PNG files in a benchmark run directory:
+Creates PNG files in a benchmark run directory:
 1) cluster_build_time_ms.png
 2) query_latency_mean_ms.png
+3) cluster_build_stacked.png
+4) query_stacked.png
+5) series_legend.png
 """
 
 import argparse
@@ -26,6 +29,41 @@ import seaborn as sns
 FLOAT_RE = r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
 BUILD_TIME_RE = re.compile(rf"cluster_build_time_ms={FLOAT_RE}")
 MEAN_MS_RE = re.compile(rf"aggregate:\s+.*\bmean_ms={FLOAT_RE}")
+
+# Stage timing keys (tweak these lists to add/remove stages)
+CLUSTER_BUILD_STAGES = [
+    "cluster_build_membership_ms",
+    "cluster_build_centroid_update_ms",
+    "cluster_build_mpi_membership_comm_ms",
+    "cluster_build_mpi_centroid_comm_ms",
+]
+
+CLUSTER_BUILD_STAGE_LABELS = [
+    "Membership\nAssignment",
+    "Centroid\nUpdate",
+    "MPI Membership\nComm",
+    "MPI Centroid\nComm",
+]
+
+QUERY_STAGES = [
+    "query_centroid_dist_ms",
+    "query_scan_ms",
+    "query_openmp_merge_ms",
+    "query_mpi_bcast_ms",
+    "query_mpi_gather_ms",
+    "query_mpi_merge_ms",
+    "query_result_assemble_ms",
+]
+
+QUERY_STAGE_LABELS = [
+    "Centroid\nDistances",
+    "Scan",
+    "OpenMP\nMerge",
+    "MPI\nBroadcast",
+    "MPI\nGather",
+    "MPI\nMerge",
+    "Result\nAssembly",
+]
 
 OPENMP_SERIES_RE = re.compile(r"^OpenMP t=(\d+)$")
 MPI_SERIES_RE = re.compile(r"^MPI N=(\d+) n=(\d+)$")
@@ -66,7 +104,6 @@ def build_series_palette(series_order: list[str]) -> dict[str, tuple[float, floa
 
 
 def get_x_tick_fontsize(series_count: int) -> float:
-    # Shrink labels as categories grow while keeping them readable.
     return max(6.0, min(11.0, 12.0 - (series_count * 0.3)))
 
 
@@ -182,7 +219,36 @@ def parse_log_metrics(log_file: Path) -> tuple[float | None, float | None]:
     return build_ms, mean_ms
 
 
-def collect_records(logs_dir: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def parse_stage_value(text: str, key: str, is_mpi: bool = False) -> float | None:
+    if is_mpi:
+        pattern = rf"rank=0\s+{key}={FLOAT_RE}"
+    else:
+        pattern = rf"(?<!rank=\d+\s){key}={FLOAT_RE}"
+        # Fallback: if the non-MPI pattern didn't match, try plain key=value
+    m = re.search(pattern, text)
+    if m:
+        return float(m.group(1))
+    # Fallback: try plain key=value
+    m2 = re.search(rf"(?<!\S){key}={FLOAT_RE}", text)
+    if m2:
+        return float(m2.group(1))
+    return None
+
+
+def parse_stage_timings(log_file: Path, stage_keys: list[str]) -> dict[str, float]:
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    is_mpi = "mpi" in log_file.name
+    result: dict[str, float] = {}
+    for key in stage_keys:
+        val = parse_stage_value(text, key, is_mpi)
+        if val is not None:
+            result[key] = val
+    return result
+
+
+def collect_records(
+    logs_dir: Path,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     build_records: list[dict[str, object]] = []
     latency_records: list[dict[str, object]] = []
 
@@ -196,7 +262,6 @@ def collect_records(logs_dir: Path) -> tuple[list[dict[str, object]], list[dict[
 
             build_ms, mean_ms = parse_log_metrics(log_file)
 
-            # Missing metrics are skipped per request.
             if build_ms is not None:
                 build_records.append(
                     {
@@ -215,6 +280,31 @@ def collect_records(logs_dir: Path) -> tuple[list[dict[str, object]], list[dict[
                 )
 
     return build_records, latency_records
+
+
+def collect_stage_records(
+    logs_dir: Path, stage_keys: list[str]
+) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+
+    dataset_dirs = sorted([p for p in logs_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
+    for dataset_dir in dataset_dirs:
+        dataset = dataset_dir.name
+        for log_file in sorted(dataset_dir.glob("*.log"), key=lambda p: p.name):
+            series = parse_series_name(log_file)
+            if not series:
+                continue
+
+            timings = parse_stage_timings(log_file, stage_keys)
+            if timings:
+                record: dict[str, object] = {
+                    "dataset": dataset,
+                    "series": series,
+                }
+                record.update(timings)
+                records.append(record)
+
+    return records
 
 
 def plot_metric(
@@ -267,7 +357,9 @@ def plot_metric(
         band_regions: list[tuple[float, float, str]] = []
         for group_prefix, band_color in group_bands:
             group_positions = [
-                pos for pos, series_name in enumerate(series_in_data) if series_name.startswith(group_prefix)
+                pos
+                for pos, series_name in enumerate(series_in_data)
+                if series_name.startswith(group_prefix)
             ]
             if group_positions:
                 band_start = min(group_positions) - 0.5
@@ -342,6 +434,157 @@ def plot_metric(
     plt.close(fig)
 
 
+def plot_stacked_stages(
+    records: list[dict[str, object]],
+    stage_keys: list[str],
+    stage_labels: list[str],
+    title: str,
+    output_path: Path,
+    series_order: list[str],
+) -> None:
+    if not records:
+        print(f"warning: no data found for plot {output_path.name}")
+        return
+
+    sns.set_theme(style="whitegrid", context="talk")
+    df = pd.DataFrame(records)
+    for k in stage_keys:
+        if k not in df.columns:
+            df[k] = 0.0
+    datasets = sorted(df["dataset"].unique())
+    series_in_data = [s for s in series_order if any(df["series"] == s)]
+
+    ncols = 2
+    nrows = max(1, math.ceil(len(datasets) / ncols))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 3.2 * nrows))
+    axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
+
+    # Build a palette for stages
+    n_stages = len(stage_keys)
+    stage_colors = sns.color_palette("Set2", n_colors=n_stages)
+
+    for idx, dataset in enumerate(datasets):
+        ax = axes_flat[idx]
+        df_ds = df[df["dataset"] == dataset]
+
+        pivot = df_ds.pivot_table(index="series", values=stage_keys, aggfunc="first")
+        # Reindex to match series_order; fill missing with 0
+        pivot = pivot.reindex(series_in_data, fill_value=0.0)
+
+        totals = pivot.sum(axis=1)
+        if totals.empty or totals.max() == 0:
+            ax.set_title(f"{dataset} (no data)")
+            continue
+
+        max_val = totals.max()
+        scale, y_label, unit = choose_time_unit(max_val)
+
+        x_pos = list(range(len(series_in_data)))
+        cum_bottom = [0.0] * len(series_in_data)
+
+        for si, key in enumerate(stage_keys):
+            values = (pivot[key] / scale).values
+            bars = ax.bar(
+                x_pos,
+                values,
+                bottom=cum_bottom,
+                width=0.65,
+                color=stage_colors[si],
+                edgecolor="white",
+                linewidth=0.4,
+                label=stage_labels[si] if idx == 0 else None,
+            )
+            # Annotate segments that are large enough to show
+            for xi, v in enumerate(values):
+                if v > 0 and v > max_val / scale * 0.04:
+                    ax.annotate(
+                        f"{v:.1f}",
+                        (xi, cum_bottom[xi] + v / 2),
+                        ha="center",
+                        va="center",
+                        fontsize=5.5,
+                        color="black",
+                        fontweight="bold",
+                    )
+            for xi in range(len(series_in_data)):
+                cum_bottom[xi] += values[xi]
+
+        # Add total annotation on top of each bar
+        for xi, series_name in enumerate(series_in_data):
+            total_val = totals.iloc[xi] / scale
+            if total_val > 0:
+                ax.annotate(
+                    f"{total_val:.0f}" if unit in ("ms", "μs") else f"{total_val:.1f}",
+                    (xi, totals.iloc[xi] / scale),
+                    xytext=(0, 4),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
+
+        ax.set_title(str(dataset))
+        ax.set_xlabel("")
+        ax.set_ylabel(y_label)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(series_in_data, rotation=40, ha="right", fontsize=get_x_tick_fontsize(len(series_in_data)))
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+        ax.yaxis.set_major_formatter(
+            FuncFormatter(lambda val, _pos: f"{val:.0f}" if unit in ("ms", "μs") else f"{val:.1f}")
+        )
+        ymax_val = float(totals.max() / scale)
+        ax.set_ylim(0, ymax_val * 1.15 if ymax_val > 0 else 1.0)
+
+        # Group bands for OpenMP/MPI
+        group_bands = [
+            ("OpenMP", "#4C72B0"),
+            ("MPI", "#55A868"),
+        ]
+        group_labels_shown = []
+        for group_prefix, band_color in group_bands:
+            group_positions = [
+                pos
+                for pos, series_name in enumerate(series_in_data)
+                if series_name.startswith(group_prefix)
+            ]
+            if group_positions:
+                gs = min(group_positions) - 0.5
+                ge = max(group_positions) + 0.5
+                ax.axvspan(gs, ge, color=band_color, alpha=0.08, zorder=0)
+                group_labels_shown.append(
+                    ((gs + ge) / 2.0, ymax_val * 1.12, group_prefix)
+                )
+
+        for gx, gy, gname in group_labels_shown:
+            ax.text(gx, gy, gname, ha="center", va="bottom", fontsize=8, color="#444444", fontweight="semibold")
+
+    for idx in range(len(datasets), len(axes_flat)):
+        axes_flat[idx].axis("off")
+
+    # Add legend for stages
+    if n_stages > 0 and len(datasets) > 0:
+        handles = [
+            plt.Rectangle((0, 0), 1, 1, color=stage_colors[si], edgecolor="white")
+            for si in range(n_stages)
+        ]
+        # Simplify labels: remove newlines for legend
+        legend_labels = [lb.replace("\n", " ") for lb in stage_labels]
+        axes_flat[0].legend(
+            handles,
+            legend_labels,
+            loc="upper left",
+            fontsize=7,
+            framealpha=0.9,
+        )
+
+    fig.suptitle(title, fontsize=18, y=0.98)
+    fig.subplots_adjust(top=0.90)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> int:
     args = parse_args()
     logs_dir = resolve_logs_dir(args.logs_dir)
@@ -361,6 +604,10 @@ def main() -> int:
     latency_plot = logs_dir / "query_latency_mean_ms.png"
     legend_plot = logs_dir / "series_legend.png"
 
+    cluster_stage_records = collect_stage_records(logs_dir, CLUSTER_BUILD_STAGES)
+    query_stage_records = collect_stage_records(logs_dir, QUERY_STAGES)
+
+    # Existing plots
     plot_metric(
         build_records,
         title="Cluster Build Time by Dataset",
@@ -380,6 +627,31 @@ def main() -> int:
     print(f"Wrote plot: {build_plot}")
     print(f"Wrote plot: {latency_plot}")
     print(f"Wrote plot: {legend_plot}")
+
+    # Stacked stage breakdown plots
+    cluster_stacked_plot = logs_dir / "cluster_build_stacked.png"
+    query_stacked_plot = logs_dir / "query_stacked.png"
+
+    plot_stacked_stages(
+        cluster_stage_records,
+        CLUSTER_BUILD_STAGES,
+        CLUSTER_BUILD_STAGE_LABELS,
+        title="Cluster Build Breakdown by Dataset",
+        output_path=cluster_stacked_plot,
+        series_order=series_order,
+    )
+    plot_stacked_stages(
+        query_stage_records,
+        QUERY_STAGES,
+        QUERY_STAGE_LABELS,
+        title="Query Stage Breakdown by Dataset",
+        output_path=query_stacked_plot,
+        series_order=series_order,
+    )
+
+    print(f"Wrote plot: {cluster_stacked_plot}")
+    print(f"Wrote plot: {query_stacked_plot}")
+
     return 0
 
 
