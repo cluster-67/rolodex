@@ -16,7 +16,7 @@ cmake --build . --target knn --parallel
 DATASET="${1:-fashion-mnist}"
 NODES=1
 TOTAL_TASKS=1
-THREADS_PER_TASK=64
+THREADS_PER_TASK=16
 NUM_VALIDATIONS=1000
 
 color_echo "blue" "Running knn (openmp) and profiling... [DATASET=$DATASET, NODES=$NODES, TOTAL_TASKS=$TOTAL_TASKS]"

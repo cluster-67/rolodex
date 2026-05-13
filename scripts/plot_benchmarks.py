@@ -32,9 +32,9 @@ MPI_SERIES_RE = re.compile(r"^MPI N=(\d+) n=(\d+)$")
 
 
 def choose_time_unit(max_ms: float) -> tuple[float, str, str]:
-    if max_ms < 1.0:
+    if max_ms < 10.0:
         return 0.001, "Microseconds (μs)", "μs"
-    if max_ms < 1_000:
+    if max_ms < 10_000:
         return 1.0, "Milliseconds (ms)", "ms"
     if max_ms < 120_000:
         return 1_000.0, "Seconds (s)", "s"
