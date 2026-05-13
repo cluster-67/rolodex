@@ -200,12 +200,9 @@ int OpenMPKNNAlgorithm::find_nearest_centroid(const float *point) const {
 }
 
 QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, int nprobe) const {
-    auto *sink = rolodex::timing::query_stage_sink();
-    rolodex::timing::QueryStageTimings stage;
+    rolodex::timing::QueryStageGuard guard;
     auto finish = [&](QueryResult result) {
-        if (sink != nullptr) {
-            sink->add(stage);
-        }
+        guard.flush();
         return result;
     };
 
@@ -235,7 +232,7 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
                   return a.second < b.second;
               });
     const auto centroid_end = rolodex::timing::SteadyClock::now();
-    stage.centroid_dist_ms += rolodex::timing::millis_between(centroid_start, centroid_end);
+    guard.stage_.centroid_dist_ms += rolodex::timing::millis_between(centroid_start, centroid_end);
 
     const auto scan_start = rolodex::timing::SteadyClock::now();
     std::vector<char> probed(static_cast<std::size_t>(num_clusters_), 0);
@@ -245,9 +242,6 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     }
 
     const std::size_t k_cap = std::min(static_cast<std::size_t>(top_k), num_points);
-    if (k_cap == 0) {
-        return finish(QueryResult{});
-    }
 
     const int max_threads = omp_get_max_threads();
     std::vector<utils::knn::TopKAccumulator> locals;
@@ -277,7 +271,7 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     }
 
     const auto scan_end = rolodex::timing::SteadyClock::now();
-    stage.scan_ms += rolodex::timing::millis_between(scan_start, scan_end);
+    guard.stage_.scan_ms += rolodex::timing::millis_between(scan_start, scan_end);
 
     const auto merge_start = rolodex::timing::SteadyClock::now();
     utils::knn::TopKAccumulator merged(k_cap);
@@ -289,7 +283,7 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
         }
     }
     const auto merge_end = rolodex::timing::SteadyClock::now();
-    stage.openmp_merge_ms += rolodex::timing::millis_between(merge_start, merge_end);
+    guard.stage_.openmp_merge_ms += rolodex::timing::millis_between(merge_start, merge_end);
 
     std::vector<std::pair<float, std::size_t>> scored = merged.extract_sorted();
     if (scored.empty()) {
@@ -309,7 +303,7 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
         result.distances.push_back(entry.first);
     }
     const auto assemble_end = rolodex::timing::SteadyClock::now();
-    stage.result_assemble_ms += rolodex::timing::millis_between(assemble_start, assemble_end);
+    guard.stage_.result_assemble_ms += rolodex::timing::millis_between(assemble_start, assemble_end);
     return finish(std::move(result));
 }
 

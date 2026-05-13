@@ -66,5 +66,20 @@ struct QueryStageTimings {
 void set_query_stage_sink(QueryStageTimings *sink);
 QueryStageTimings *query_stage_sink();
 
+class QueryStageGuard {
+  public:
+    QueryStageGuard() : sink_(query_stage_sink()) {}
+    ~QueryStageGuard() { flush(); }
+    void flush() {
+        if (sink_ != nullptr) {
+            sink_->add(stage_);
+            sink_ = nullptr;
+        }
+    }
+    QueryStageTimings stage_;
+  private:
+    QueryStageTimings *sink_;
+};
+
 } // namespace timing
 } // namespace rolodex

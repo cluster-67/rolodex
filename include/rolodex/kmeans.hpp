@@ -107,6 +107,12 @@ class MPIKMeans : public KNNAlgorithm {
     void update_centroids();
     int find_nearest_centroid(const float *point) const;
 
+    double cluster_membership_ms_ = 0.0;
+    double cluster_centroid_update_ms_ = 0.0;
+    double cluster_mpi_membership_comm_ms_ = 0.0;
+    double cluster_mpi_centroid_comm_ms_ = 0.0;
+    std::size_t cluster_membership_iters_ = 0;
+
   public:
     MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size);
 
@@ -116,11 +122,4 @@ class MPIKMeans : public KNNAlgorithm {
 
     /** Vector dimension (same as centroid width); valid after `create_clusters`. */
     int vector_dim() const;
-
-  private:
-    double cluster_membership_ms_ = 0.0;
-    double cluster_centroid_update_ms_ = 0.0;
-    double cluster_mpi_membership_comm_ms_ = 0.0;
-    double cluster_mpi_centroid_comm_ms_ = 0.0;
-    std::size_t cluster_membership_iters_ = 0;
 };

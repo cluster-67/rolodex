@@ -232,9 +232,14 @@ def parse_stage_value(text: str, key: str, is_mpi: bool = False) -> float | None
     return None
 
 
+def _is_mpi_log(log_file: Path) -> bool:
+    name = log_file.name
+    return bool(re.fullmatch(r"mpi-N\d+-n\d+\.log", name))
+
+
 def parse_stage_timings(log_file: Path, stage_keys: list[str]) -> dict[str, float]:
     text = log_file.read_text(encoding="utf-8", errors="replace")
-    is_mpi = "mpi" in log_file.name
+    is_mpi = _is_mpi_log(log_file)
     result: dict[str, float] = {}
     for key in stage_keys:
         val = parse_stage_value(text, key, is_mpi)
