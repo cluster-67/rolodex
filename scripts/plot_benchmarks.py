@@ -32,6 +32,8 @@ MPI_SERIES_RE = re.compile(r"^MPI N=(\d+) n=(\d+)$")
 
 
 def choose_time_unit(max_ms: float) -> tuple[float, str, str]:
+    if max_ms < 1.0:
+        return 0.001, "Microseconds (μs)", "μs"
     if max_ms < 1_000:
         return 1.0, "Milliseconds (ms)", "ms"
     if max_ms < 120_000:
@@ -284,7 +286,7 @@ def plot_metric(
             if not math.isfinite(height):
                 continue
             x_center = patch.get_x() + (patch.get_width() / 2.0)
-            label = f"{height:.0f}" if unit == "ms" else f"{height:.1f}"
+            label = f"{height:.0f}" if unit in ("ms", "μs") else f"{height:.1f}"
             ax.annotate(
                 label,
                 (x_center, height),
@@ -304,7 +306,7 @@ def plot_metric(
         ax.set_ylabel(y_label)
         ax.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
         ax.yaxis.set_major_formatter(
-            FuncFormatter(lambda val, _pos: f"{val:.0f}" if unit == "ms" else f"{val:.1f}")
+            FuncFormatter(lambda val, _pos: f"{val:.0f}" if unit in ("ms", "μs") else f"{val:.1f}")
         )
         ymax = float(df_ds["value"].max())
         ax.set_ylim(0, ymax * 1.10 if ymax > 0 else 1.0)

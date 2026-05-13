@@ -17,10 +17,12 @@ DATASET="${1:-fashion-mnist}"
 NODES=1
 TOTAL_TASKS=1
 THREADS_PER_TASK=64
+NUM_VALIDATIONS=1000
 
 color_echo "blue" "Running knn (openmp) and profiling... [DATASET=$DATASET, NODES=$NODES, TOTAL_TASKS=$TOTAL_TASKS]"
+# Double-quoted -c so $SCRATCH / $SLURM_PROCID expand on the compute node; embed paths from this host.
 srun -N $NODES -n $TOTAL_TASKS \
-  bash -c 'OMP_NUM_THREADS=$THREADS_PER_TASK perf record -F 999 --call-graph dwarf -o $SCRATCH/perf-$SLURM_PROCID.data '"$BUILD_DIR/knn"' openmp --dataset '"$DATASET"
+  bash -c "OMP_NUM_THREADS=${THREADS_PER_TASK} perf record -F 999 --call-graph dwarf -o \${SCRATCH}/perf-\${SLURM_PROCID}.data ${BUILD_DIR}/knn openmp --dataset ${DATASET} --validation-count ${NUM_VALIDATIONS}"
 
 rm -f $SCRATCH/perf-*.data.old
 
