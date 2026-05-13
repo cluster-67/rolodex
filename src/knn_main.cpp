@@ -193,9 +193,6 @@ int main(int argc, char **argv) {
             rolodex::timing::millis_between(cluster_build_start, cluster_build_end);
         std::cout << "cluster_build_time_ms=" << cluster_build_ms << '\n';
     }
-    if (mpi.enabled) {
-        std::cout << "rank=" << mpi.rank << ' ';
-    }
     knn_algorithm->print_cluster_build_metrics(std::cout);
 
     const ValidatorConfig vcfg{cfg.top_k, cfg.nprobe, cfg.vector_match_eps};

@@ -175,11 +175,11 @@ void MPIKMeans::update_centroids() {
 }
 
 void MPIKMeans::print_cluster_build_metrics(std::ostream &out) const {
-    out << "cluster_build_membership_ms=" << cluster_membership_ms_ << '\n';
-    out << "cluster_build_centroid_update_ms=" << cluster_centroid_update_ms_ << '\n';
-    out << "cluster_build_mpi_membership_comm_ms=" << cluster_mpi_membership_comm_ms_ << '\n';
-    out << "cluster_build_mpi_centroid_comm_ms=" << cluster_mpi_centroid_comm_ms_ << '\n';
-    out << "cluster_build_membership_iters=" << cluster_membership_iters_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_membership_ms=" << cluster_membership_ms_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_centroid_update_ms=" << cluster_centroid_update_ms_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_mpi_membership_comm_ms=" << cluster_mpi_membership_comm_ms_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_mpi_centroid_comm_ms=" << cluster_mpi_centroid_comm_ms_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_membership_iters=" << cluster_membership_iters_ << '\n';
 }
 
 int MPIKMeans::find_nearest_centroid(const float *point) const {
