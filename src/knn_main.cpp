@@ -63,11 +63,13 @@ ValidationSummary run_mpi_collective_validation(Dataset &dataset, MPIKMeans &mpi
     MPI_Bcast(&nq, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     rolodex::timing::QueryLatencyAccumulator query_latency;
+    rolodex::timing::QueryStageTimings stage_totals;
     float recall_sum = 0.0f;
 
     const int dim = mpi_algo.vector_dim();
     TVector q_dummy(static_cast<std::size_t>(dim > 0 ? dim : 0), 0.0f);
 
+    rolodex::timing::set_query_stage_sink(&stage_totals);
     for (int qi = 0; qi < nq; ++qi) {
         const auto q_start = rolodex::timing::SteadyClock::now();
         QueryResult predicted;
@@ -95,11 +97,23 @@ ValidationSummary run_mpi_collective_validation(Dataset &dataset, MPIKMeans &mpi
             }
         }
     }
+    rolodex::timing::set_query_stage_sink(nullptr);
+
+    auto print_rank_metric = [&](const char *key, double value) {
+        out << "rank=" << rank << ' ' << key << '=' << value << '\n';
+    };
+    print_rank_metric("query_centroid_dist_ms", stage_totals.centroid_dist_ms);
+    print_rank_metric("query_scan_ms", stage_totals.scan_ms);
+    print_rank_metric("query_mpi_bcast_ms", stage_totals.mpi_bcast_ms);
+    print_rank_metric("query_mpi_gather_ms", stage_totals.mpi_gather_ms);
+    print_rank_metric("query_mpi_merge_ms", stage_totals.mpi_merge_ms);
+    print_rank_metric("query_result_assemble_ms", stage_totals.result_assemble_ms);
 
     if (rank == 0) {
         const float mean_recall = recall_sum / static_cast<float>(nq);
         out << "aggregate: mean_recall@" << vcfg.top_k << "=" << mean_recall << '\n';
         query_latency.print_aggregate(out);
+        out << "validation_query_count=" << nq << '\n';
         return ValidationSummary{static_cast<std::size_t>(nq), mean_recall};
     }
     return ValidationSummary{0, 0.0f};
@@ -179,6 +193,10 @@ int main(int argc, char **argv) {
             rolodex::timing::millis_between(cluster_build_start, cluster_build_end);
         std::cout << "cluster_build_time_ms=" << cluster_build_ms << '\n';
     }
+    if (mpi.enabled) {
+        std::cout << "rank=" << mpi.rank << ' ';
+    }
+    knn_algorithm->print_cluster_build_metrics(std::cout);
 
     const ValidatorConfig vcfg{cfg.top_k, cfg.nprobe, cfg.vector_match_eps};
 

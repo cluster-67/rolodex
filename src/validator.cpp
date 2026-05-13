@@ -15,8 +15,10 @@ ValidationSummary Validator::run(std::ostream &out, std::ostream &err) const {
     }
 
     rolodex::timing::QueryLatencyAccumulator query_latency;
+    rolodex::timing::QueryStageTimings stage_totals;
     float recall_sum = 0.0f;
 
+    rolodex::timing::set_query_stage_sink(&stage_totals);
     for (std::size_t qi = 0; qi < validation_points.size(); ++qi) {
         const ValidationPoint &vp = validation_points[qi];
 
@@ -41,10 +43,16 @@ ValidationSummary Validator::run(std::ostream &out, std::ostream &err) const {
                                                         config_.vector_match_eps, err);
         }
     }
+    rolodex::timing::set_query_stage_sink(nullptr);
 
     const float mean_recall = recall_sum / static_cast<float>(validation_points.size());
     out << "aggregate: mean_recall@" << config_.top_k << "=" << mean_recall << '\n';
     query_latency.print_aggregate(out);
+    out << "query_centroid_dist_ms=" << stage_totals.centroid_dist_ms << '\n';
+    out << "query_scan_ms=" << stage_totals.scan_ms << '\n';
+    out << "query_openmp_merge_ms=" << stage_totals.openmp_merge_ms << '\n';
+    out << "query_result_assemble_ms=" << stage_totals.result_assemble_ms << '\n';
+    out << "validation_query_count=" << validation_points.size() << '\n';
 
     return ValidationSummary{validation_points.size(), mean_recall};
 }

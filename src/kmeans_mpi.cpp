@@ -2,6 +2,7 @@
 
 #include "rolodex/dataset.hpp"
 #include "rolodex/distance.hpp"
+#include "rolodex/timing.hpp"
 #include "rolodex/utils.hpp"
 
 #include <algorithm>
@@ -35,6 +36,12 @@ void MPIKMeans::create_clusters(int update_frequency) {
     if (N <= 0 || D <= 0 || num_clusters_ <= 0) {
         return;
     }
+
+    cluster_membership_ms_ = 0.0;
+    cluster_centroid_update_ms_ = 0.0;
+    cluster_mpi_membership_comm_ms_ = 0.0;
+    cluster_mpi_centroid_comm_ms_ = 0.0;
+    cluster_membership_iters_ = 0;
 
     // Per-rank point counts (same formula as Scatterv counts)
     int prefix_points = 0;
@@ -83,6 +90,7 @@ void MPIKMeans::create_clusters(int update_frequency) {
         iters++;
 
         int local_changes = 0;
+        const auto membership_start = rolodex::timing::SteadyClock::now();
         for (int i = 0; i < local_n; i++) {
             const int nearest =
                 find_nearest_centroid(local_points_flat_.data() + static_cast<std::size_t>(i) * D);
@@ -91,9 +99,17 @@ void MPIKMeans::create_clusters(int update_frequency) {
                 local_changes++;
             }
         }
+        const auto membership_end = rolodex::timing::SteadyClock::now();
+        cluster_membership_ms_ +=
+            rolodex::timing::millis_between(membership_start, membership_end);
+        cluster_membership_iters_++;
 
         int global_changes = 0;
+        const auto comm_start = rolodex::timing::SteadyClock::now();
         MPI_Allreduce(&local_changes, &global_changes, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        const auto comm_end = rolodex::timing::SteadyClock::now();
+        cluster_mpi_membership_comm_ms_ +=
+            rolodex::timing::millis_between(comm_start, comm_end);
 
         if (rank_ == 0) {
             std::cout << "Iteration " << iters << " with " << global_changes
@@ -105,7 +121,11 @@ void MPIKMeans::create_clusters(int update_frequency) {
         }
 
         if (iters % update_frequency == 0) {
+            const auto update_start = rolodex::timing::SteadyClock::now();
             update_centroids();
+            const auto update_end = rolodex::timing::SteadyClock::now();
+            cluster_centroid_update_ms_ +=
+                rolodex::timing::millis_between(update_start, update_end);
         }
     }
 }
@@ -133,8 +153,11 @@ void MPIKMeans::update_centroids() {
         local_buf[static_cast<std::size_t>(base + dim)] += 1.0f;
     }
 
+    const auto comm_start = rolodex::timing::SteadyClock::now();
     MPI_Allreduce(local_buf.data(), global_buf.data(), buf_size, MPI_FLOAT, MPI_SUM,
                   MPI_COMM_WORLD);
+    const auto comm_end = rolodex::timing::SteadyClock::now();
+    cluster_mpi_centroid_comm_ms_ += rolodex::timing::millis_between(comm_start, comm_end);
 
     for (int c = 0; c < num_clusters_; c++) {
         const int base = c * (dim + 1);
@@ -149,6 +172,14 @@ void MPIKMeans::update_centroids() {
             }
         }
     }
+}
+
+void MPIKMeans::print_cluster_build_metrics(std::ostream &out) const {
+    out << "cluster_build_membership_ms=" << cluster_membership_ms_ << '\n';
+    out << "cluster_build_centroid_update_ms=" << cluster_centroid_update_ms_ << '\n';
+    out << "cluster_build_mpi_membership_comm_ms=" << cluster_mpi_membership_comm_ms_ << '\n';
+    out << "cluster_build_mpi_centroid_comm_ms=" << cluster_mpi_centroid_comm_ms_ << '\n';
+    out << "cluster_build_membership_iters=" << cluster_membership_iters_ << '\n';
 }
 
 int MPIKMeans::find_nearest_centroid(const float *point) const {
@@ -177,12 +208,22 @@ int MPIKMeans::vector_dim() const {
 }
 
 QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprobe) const {
+    auto *sink = rolodex::timing::query_stage_sink();
+    rolodex::timing::QueryStageTimings stage;
+    auto finish = [&](QueryResult result) {
+        if (sink != nullptr) {
+            sink->add(stage);
+        }
+        return result;
+    };
+
     int tk = 0;
     int np = 0;
     if (rank_ == 0) {
         tk = top_k;
         np = nprobe;
     }
+    const auto bcast_start = rolodex::timing::SteadyClock::now();
     MPI_Bcast(&tk, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&np, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -196,13 +237,16 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     if (dim > 0) {
         MPI_Bcast(qbuf.data(), dim, MPI_FLOAT, 0, MPI_COMM_WORLD);
     }
+    const auto bcast_end = rolodex::timing::SteadyClock::now();
+    stage.mpi_bcast_ms += rolodex::timing::millis_between(bcast_start, bcast_end);
 
     if (tk <= 0 || num_clusters_ <= 0 || dim <= 0) {
-        return QueryResult{};
+        return finish(QueryResult{});
     }
 
     const int nprobe_clamped = std::max(1, std::min(np, num_clusters_));
 
+    const auto centroid_start = rolodex::timing::SteadyClock::now();
     std::vector<std::pair<float, int>> centroid_dists;
     centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
     for (int c = 0; c < num_clusters_; ++c) {
@@ -220,7 +264,10 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
                   }
                   return a.second < b.second;
               });
+    const auto centroid_end = rolodex::timing::SteadyClock::now();
+    stage.centroid_dist_ms += rolodex::timing::millis_between(centroid_start, centroid_end);
 
+    const auto scan_start = rolodex::timing::SteadyClock::now();
     std::vector<char> probed(static_cast<std::size_t>(num_clusters_), 0);
     for (int p = 0; p < nprobe_clamped; ++p) {
         const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
@@ -230,6 +277,9 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     const std::size_t local_n =
         dim > 0 ? local_points_flat_.size() / static_cast<std::size_t>(dim) : 0;
     const std::size_t k_cap = std::min(static_cast<std::size_t>(tk), local_n);
+    if (k_cap == 0) {
+        return finish(QueryResult{});
+    }
     utils::knn::TopKAccumulator topk(k_cap);
     for (std::size_t liu = 0; liu < local_n; ++liu) {
         const int centroid_idx = local_membership_[liu];
@@ -249,6 +299,8 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     }
 
     std::vector<std::pair<float, std::size_t>> scored = topk.extract_sorted();
+    const auto scan_end = rolodex::timing::SteadyClock::now();
+    stage.scan_ms += rolodex::timing::millis_between(scan_start, scan_end);
     const int local_count = static_cast<int>(scored.size());
     std::vector<float> send_d(static_cast<std::size_t>(local_count));
     std::vector<int> send_g(static_cast<std::size_t>(local_count));
@@ -261,6 +313,7 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     if (rank_ == 0) {
         recvcounts.resize(static_cast<std::size_t>(size_));
     }
+    const auto gather_start = rolodex::timing::SteadyClock::now();
     MPI_Gather(&local_count, 1, MPI_INT, rank_ == 0 ? recvcounts.data() : nullptr, 1, MPI_INT, 0,
                MPI_COMM_WORLD);
 
@@ -287,16 +340,19 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     MPI_Gatherv(send_g.data(), local_count, MPI_INT, rank_ == 0 ? allg.data() : nullptr,
                 rank_ == 0 ? recvcounts.data() : nullptr, rank_ == 0 ? displs.data() : nullptr,
                 MPI_INT, 0, MPI_COMM_WORLD);
+    const auto gather_end = rolodex::timing::SteadyClock::now();
+    stage.mpi_gather_ms += rolodex::timing::millis_between(gather_start, gather_end);
 
     QueryResult result;
     if (rank_ != 0) {
-        return result;
+        return finish(result);
     }
 
     if (total_recv <= 0) {
-        return result;
+        return finish(result);
     }
 
+    const auto merge_start = rolodex::timing::SteadyClock::now();
     utils::knn::TopKAccumulator merged_topk(static_cast<std::size_t>(tk));
     for (int i = 0; i < total_recv; ++i) {
         const float d = alldist[static_cast<std::size_t>(i)];
@@ -307,9 +363,12 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     }
     std::vector<std::pair<float, std::size_t>> merged = merged_topk.extract_sorted();
     const std::size_t k_out = merged.size();
+    const auto merge_end = rolodex::timing::SteadyClock::now();
+    stage.mpi_merge_ms += rolodex::timing::millis_between(merge_start, merge_end);
 
     const float *pts_flat = dataset_->get_flat();
     const std::size_t num_points = dataset_->n_points();
+    const auto assemble_start = rolodex::timing::SteadyClock::now();
     result.neighbors.reserve(k_out);
     result.distances.reserve(k_out);
     for (std::size_t i = 0; i < k_out; ++i) {
@@ -324,5 +383,7 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
         result.neighbors.push_back(std::move(neighbor));
         result.distances.push_back(merged[i].first);
     }
-    return result;
+    const auto assemble_end = rolodex::timing::SteadyClock::now();
+    stage.result_assemble_ms += rolodex::timing::millis_between(assemble_start, assemble_end);
+    return finish(std::move(result));
 }

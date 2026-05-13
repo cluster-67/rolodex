@@ -43,5 +43,28 @@ class QueryLatencyAccumulator {
     std::size_t count_ = 0;
 };
 
+struct QueryStageTimings {
+    double centroid_dist_ms = 0.0;
+    double scan_ms = 0.0;
+    double openmp_merge_ms = 0.0;
+    double mpi_bcast_ms = 0.0;
+    double mpi_gather_ms = 0.0;
+    double mpi_merge_ms = 0.0;
+    double result_assemble_ms = 0.0;
+
+    void add(const QueryStageTimings &other) {
+        centroid_dist_ms += other.centroid_dist_ms;
+        scan_ms += other.scan_ms;
+        openmp_merge_ms += other.openmp_merge_ms;
+        mpi_bcast_ms += other.mpi_bcast_ms;
+        mpi_gather_ms += other.mpi_gather_ms;
+        mpi_merge_ms += other.mpi_merge_ms;
+        result_assemble_ms += other.result_assemble_ms;
+    }
+};
+
+void set_query_stage_sink(QueryStageTimings *sink);
+QueryStageTimings *query_stage_sink();
+
 } // namespace timing
 } // namespace rolodex

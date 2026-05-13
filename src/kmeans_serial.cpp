@@ -1,6 +1,7 @@
 #include "rolodex/kmeans.hpp"
 
 #include "rolodex/distance.hpp"
+#include "rolodex/timing.hpp"
 #include "rolodex/utils.hpp"
 
 #include <H5Cpp.h>
@@ -33,8 +34,15 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
 
     if (cache_enabled_ && load_clusters_from_cache()) {
         std::cout << "Loaded cluster cache from " << get_cache_path() << '\n';
+        cluster_membership_ms_ = 0.0;
+        cluster_centroid_update_ms_ = 0.0;
+        cluster_membership_iters_ = 0;
         return;
     }
+
+    cluster_membership_ms_ = 0.0;
+    cluster_centroid_update_ms_ = 0.0;
+    cluster_membership_iters_ = 0;
 
     for (int c_idx = 0; c_idx < num_clusters_; c_idx++) {
         const int point_idx = static_cast<int>(rand() % num_points);
@@ -48,6 +56,7 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
     while (true) {
         iters++;
         int membership_change_count = 0;
+        const auto membership_start = rolodex::timing::SteadyClock::now();
         for (std::size_t point_idx = 0; point_idx < num_points; point_idx++) {
             int nearest_centroid_idx = find_nearest_centroid(points_flat + point_idx * dimension_);
             int prev_membership = membership_[point_idx];
@@ -56,6 +65,10 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
                 membership_change_count++;
             }
         }
+        const auto membership_end = rolodex::timing::SteadyClock::now();
+        cluster_membership_ms_ +=
+            rolodex::timing::millis_between(membership_start, membership_end);
+        cluster_membership_iters_++;
 
         std::cout << "Iteration " << iters << " with " << membership_change_count
                   << " membership changes" << '\n';
@@ -64,7 +77,11 @@ void SerialKNNAlgorithm::create_clusters(int update_frequency) {
         }
 
         if (iters % update_frequency == 0) {
+            const auto update_start = rolodex::timing::SteadyClock::now();
             update_centroids();
+            const auto update_end = rolodex::timing::SteadyClock::now();
+            cluster_centroid_update_ms_ +=
+                rolodex::timing::millis_between(update_start, update_end);
         }
     }
 
@@ -114,6 +131,12 @@ void SerialKNNAlgorithm::update_centroids() {
     }
 }
 
+void SerialKNNAlgorithm::print_cluster_build_metrics(std::ostream &out) const {
+    out << "cluster_build_membership_ms=" << cluster_membership_ms_ << '\n';
+    out << "cluster_build_centroid_update_ms=" << cluster_centroid_update_ms_ << '\n';
+    out << "cluster_build_membership_iters=" << cluster_membership_iters_ << '\n';
+}
+
 int SerialKNNAlgorithm::find_nearest_centroid(const float *query_point) const {
     int nearest_centroid_idx = 0;
     float min_sq_dist = std::numeric_limits<float>::max();
@@ -137,15 +160,25 @@ int SerialKNNAlgorithm::find_nearest_centroid(const float *query_point) const {
 }
 
 QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, int nprobe) const {
+    auto *sink = rolodex::timing::query_stage_sink();
+    rolodex::timing::QueryStageTimings stage;
+    auto finish = [&](QueryResult result) {
+        if (sink != nullptr) {
+            sink->add(stage);
+        }
+        return result;
+    };
+
     const float *pts_flat = dataset_->get_flat();
     const std::size_t num_points = dataset_->n_points();
 
     if (num_points == 0 || top_k <= 0 || num_clusters_ <= 0) {
-        return QueryResult{};
+        return finish(QueryResult{});
     }
 
     const int nprobe_clamped = std::max(1, std::min(nprobe, num_clusters_));
 
+    const auto centroid_start = rolodex::timing::SteadyClock::now();
     std::vector<std::pair<float, int>> centroid_dists;
     centroid_dists.reserve(static_cast<std::size_t>(num_clusters_));
     for (int c = 0; c < num_clusters_; ++c) {
@@ -161,7 +194,10 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
                   }
                   return a.second < b.second;
               });
+    const auto centroid_end = rolodex::timing::SteadyClock::now();
+    stage.centroid_dist_ms += rolodex::timing::millis_between(centroid_start, centroid_end);
 
+    const auto scan_start = rolodex::timing::SteadyClock::now();
     std::vector<char> probed(static_cast<std::size_t>(num_clusters_), 0);
     for (int p = 0; p < nprobe_clamped; ++p) {
         const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
@@ -169,6 +205,9 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     }
 
     const std::size_t k_cap = std::min(static_cast<std::size_t>(top_k), num_points);
+    if (k_cap == 0) {
+        return finish(QueryResult{});
+    }
     utils::knn::TopKAccumulator topk(k_cap);
     for (std::size_t idx = 0; idx < num_points; ++idx) {
         const int centroid_idx = membership_[idx];
@@ -185,10 +224,13 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
     }
 
     std::vector<std::pair<float, std::size_t>> scored = topk.extract_sorted();
+    const auto scan_end = rolodex::timing::SteadyClock::now();
+    stage.scan_ms += rolodex::timing::millis_between(scan_start, scan_end);
     if (scored.empty()) {
-        return QueryResult{};
+        return finish(QueryResult{});
     }
 
+    const auto assemble_start = rolodex::timing::SteadyClock::now();
     QueryResult result;
     result.neighbors.reserve(scored.size());
     result.distances.reserve(scored.size());
@@ -200,7 +242,9 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
         result.neighbors.push_back(std::move(neighbor));
         result.distances.push_back(entry.first);
     }
-    return result;
+    const auto assemble_end = rolodex::timing::SteadyClock::now();
+    stage.result_assemble_ms += rolodex::timing::millis_between(assemble_start, assemble_end);
+    return finish(std::move(result));
 }
 
 namespace {

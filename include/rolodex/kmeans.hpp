@@ -4,6 +4,7 @@
 #include "rolodex/query_result.hpp"
 #include "rolodex/types.hpp"
 
+#include <iosfwd>
 #include <mpi.h>
 #include <string>
 #include <vector>
@@ -26,6 +27,8 @@ class KNNAlgorithm {
     virtual void create_clusters(int update_frequency = 1) = 0;
 
     virtual QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const = 0;
+
+    virtual void print_cluster_build_metrics(std::ostream &out) const = 0;
 };
 
 // ── Serial — flat memory layout ───────────────────────────────────────────────
@@ -34,6 +37,8 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
     SerialKNNAlgorithm(Dataset *dataset, int num_clusters, bool cache_enabled);
 
     void create_clusters(int update_frequency = 1) override;
+
+    void print_cluster_build_metrics(std::ostream &out) const override;
 
     void update_centroids();
 
@@ -50,6 +55,9 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
     std::size_t dimension_;
     bool load_clusters_from_cache();
     void save_clusters_to_cache() const;
+    double cluster_membership_ms_ = 0.0;
+    double cluster_centroid_update_ms_ = 0.0;
+    std::size_t cluster_membership_iters_ = 0;
 };
 
 // ── OpenMP — unchanged interface ──────────────────────────────────────────────
@@ -59,6 +67,8 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
                        bool debug_enabled = false);
 
     void create_clusters(int update_frequency = 1) override;
+
+    void print_cluster_build_metrics(std::ostream &out) const override;
 
     void update_centroids();
 
@@ -75,6 +85,9 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
     bool ensure_debug_root_dir() const;
     std::string build_debug_snapshot_path(int iteration, bool is_final) const;
     void save_debug_snapshot(int iteration, bool is_final) const;
+    double cluster_membership_ms_ = 0.0;
+    double cluster_centroid_update_ms_ = 0.0;
+    std::size_t cluster_membership_iters_ = 0;
 };
 
 // ── MPI — conforms to KNNAlgorithm virtual interface ──────────────────────────
@@ -98,8 +111,16 @@ class MPIKMeans : public KNNAlgorithm {
     MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size);
 
     void create_clusters(int update_frequency = 1) override;
+    void print_cluster_build_metrics(std::ostream &out) const override;
     QueryResult query_clusters(const TVector &query, int top_k, int nprobe) const override;
 
     /** Vector dimension (same as centroid width); valid after `create_clusters`. */
     int vector_dim() const;
+
+  private:
+    double cluster_membership_ms_ = 0.0;
+    double cluster_centroid_update_ms_ = 0.0;
+    double cluster_mpi_membership_comm_ms_ = 0.0;
+    double cluster_mpi_centroid_comm_ms_ = 0.0;
+    std::size_t cluster_membership_iters_ = 0;
 };
