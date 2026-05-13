@@ -162,59 +162,44 @@ QueryResult SerialKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
                   return a.second < b.second;
               });
 
-    std::vector<std::size_t> candidate_indices;
+    std::vector<char> probed(static_cast<std::size_t>(num_clusters_), 0);
     for (int p = 0; p < nprobe_clamped; ++p) {
         const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
-        const std::vector<int> from_cluster = find_nearest_points(centroid_idx, top_k);
-        for (int idx : from_cluster) {
-            candidate_indices.push_back(static_cast<std::size_t>(idx));
-        }
+        probed[static_cast<std::size_t>(centroid_idx)] = 1;
     }
 
-    if (candidate_indices.empty()) {
+    const std::size_t k_cap = std::min(static_cast<std::size_t>(top_k), num_points);
+    utils::knn::TopKAccumulator topk(k_cap);
+    for (std::size_t idx = 0; idx < num_points; ++idx) {
+        const int centroid_idx = membership_[idx];
+        if (centroid_idx < 0 || centroid_idx >= num_clusters_) {
+            continue;
+        }
+        if (!probed[static_cast<std::size_t>(centroid_idx)]) {
+            continue;
+        }
+        const float dist =
+            squared_l2(query.data(), pts_flat + idx * dimension_, dimension_);
+        topk.maybe_push(dist, idx);
+    }
+
+    std::vector<std::pair<float, std::size_t>> scored = topk.extract_sorted();
+    if (scored.empty()) {
         return QueryResult{};
     }
 
-    std::vector<std::pair<float, std::size_t>> scored;
-    scored.reserve(candidate_indices.size());
-    for (std::size_t idx : candidate_indices) {
-        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_), idx);
-    }
-
-    const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
-    std::partial_sort(
-        scored.begin(), scored.begin() + static_cast<long>(k_out), scored.end(),
-        [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
-            if (a.first != b.first) {
-                return a.first < b.first;
-            }
-            return a.second < b.second;
-        });
-
     QueryResult result;
-    result.neighbors.reserve(k_out);
-    result.distances.reserve(k_out);
-    for (std::size_t i = 0; i < k_out; ++i) {
-        const std::size_t gidx = scored[i].second;
+    result.neighbors.reserve(scored.size());
+    result.distances.reserve(scored.size());
+    for (const auto &entry : scored) {
+        const std::size_t gidx = entry.second;
         TVector neighbor(dimension_);
         std::copy(pts_flat + gidx * dimension_, pts_flat + gidx * dimension_ + dimension_,
                   neighbor.begin());
         result.neighbors.push_back(std::move(neighbor));
-        result.distances.push_back(scored[i].first);
+        result.distances.push_back(entry.first);
     }
     return result;
-}
-
-std::vector<int> SerialKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) const {
-    (void)top_k;
-    std::vector<int> nearest_points_indices;
-    const std::size_t num_points = dataset_->n_points();
-    for (std::size_t i = 0; i < num_points; i++) {
-        if (membership_[i] == centroid_idx) {
-            nearest_points_indices.push_back(static_cast<int>(i));
-        }
-    }
-    return nearest_points_indices;
 }
 
 namespace {

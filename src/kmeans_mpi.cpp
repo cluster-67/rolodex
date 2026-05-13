@@ -2,6 +2,7 @@
 
 #include "rolodex/dataset.hpp"
 #include "rolodex/distance.hpp"
+#include "rolodex/utils.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -220,35 +221,34 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
                   return a.second < b.second;
               });
 
-    // All local points in probed clusters; then keep only local top-k for gather (sufficient for
-    // exact global top-k merge on rank 0).
-    std::vector<std::pair<float, std::size_t>> scored;
+    std::vector<char> probed(static_cast<std::size_t>(num_clusters_), 0);
     for (int p = 0; p < nprobe_clamped; ++p) {
         const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
-        const std::vector<int> local_indices = find_nearest_points(centroid_idx, tk);
-        for (int li : local_indices) {
-            const std::size_t liu = static_cast<std::size_t>(li);
-            const float d = squared_l2(
-                qbuf.data(), local_points_flat_.data() + liu * static_cast<std::size_t>(dim),
-                static_cast<std::size_t>(dim));
-            const int gidx = global_point_offset_ + li;
-            scored.emplace_back(d, static_cast<std::size_t>(gidx));
+        probed[static_cast<std::size_t>(centroid_idx)] = 1;
+    }
+
+    const std::size_t local_n =
+        dim > 0 ? local_points_flat_.size() / static_cast<std::size_t>(dim) : 0;
+    const std::size_t k_cap = std::min(static_cast<std::size_t>(tk), local_n);
+    utils::knn::TopKAccumulator topk(k_cap);
+    for (std::size_t liu = 0; liu < local_n; ++liu) {
+        const int centroid_idx = local_membership_[liu];
+        if (centroid_idx < 0 || centroid_idx >= num_clusters_) {
+            continue;
         }
+        if (!probed[static_cast<std::size_t>(centroid_idx)]) {
+            continue;
+        }
+        const float d = squared_l2(
+            qbuf.data(), local_points_flat_.data() + liu * static_cast<std::size_t>(dim),
+            static_cast<std::size_t>(dim));
+        const std::size_t gidx =
+            static_cast<std::size_t>(global_point_offset_) + liu;
+        topk.maybe_push(d, gidx);
     }
 
-    const std::size_t k_local = std::min(static_cast<std::size_t>(tk), scored.size());
-    if (k_local > 0) {
-        std::partial_sort(
-            scored.begin(), scored.begin() + static_cast<long>(k_local), scored.end(),
-            [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
-                if (a.first != b.first) {
-                    return a.first < b.first;
-                }
-                return a.second < b.second;
-            });
-    }
-
-    const int local_count = static_cast<int>(k_local);
+    std::vector<std::pair<float, std::size_t>> scored = topk.extract_sorted();
+    const int local_count = static_cast<int>(scored.size());
     std::vector<float> send_d(static_cast<std::size_t>(local_count));
     std::vector<int> send_g(static_cast<std::size_t>(local_count));
     for (int i = 0; i < local_count; ++i) {
@@ -296,22 +296,13 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
         return result;
     }
 
-    std::vector<std::pair<float, std::size_t>> merged;
-    merged.reserve(static_cast<std::size_t>(total_recv));
+    utils::knn::TopKAccumulator merged_topk(static_cast<std::size_t>(tk));
     for (int i = 0; i < total_recv; ++i) {
-        merged.emplace_back(alldist[static_cast<std::size_t>(i)],
-                            static_cast<std::size_t>(allg[static_cast<std::size_t>(i)]));
+        merged_topk.maybe_push(alldist[static_cast<std::size_t>(i)],
+                               static_cast<std::size_t>(allg[static_cast<std::size_t>(i)]));
     }
-
-    const std::size_t k_out = std::min(static_cast<std::size_t>(tk), merged.size());
-    std::partial_sort(
-        merged.begin(), merged.begin() + static_cast<long>(k_out), merged.end(),
-        [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
-            if (a.first != b.first) {
-                return a.first < b.first;
-            }
-            return a.second < b.second;
-        });
+    std::vector<std::pair<float, std::size_t>> merged = merged_topk.extract_sorted();
+    const std::size_t k_out = merged.size();
 
     const float *pts_flat = dataset_->get_flat();
     const std::size_t num_points = dataset_->n_points();
@@ -330,17 +321,4 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
         result.distances.push_back(merged[i].first);
     }
     return result;
-}
-
-std::vector<int> MPIKMeans::find_nearest_points(int centroid_idx, int top_k) const {
-    (void)top_k;
-    std::vector<int> nearest_points_indices;
-    const std::size_t local_n =
-        dimension_ > 0 ? local_points_flat_.size() / static_cast<std::size_t>(dimension_) : 0;
-    for (std::size_t i = 0; i < local_n; i++) {
-        if (local_membership_[i] == centroid_idx) {
-            nearest_points_indices.push_back(static_cast<int>(i));
-        }
-    }
-    return nearest_points_indices;
 }

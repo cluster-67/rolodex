@@ -205,59 +205,68 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
                   return a.second < b.second;
               });
 
-    std::vector<std::size_t> candidate_indices;
+    std::vector<char> probed(static_cast<std::size_t>(num_clusters_), 0);
     for (int p = 0; p < nprobe_clamped; ++p) {
         const int centroid_idx = centroid_dists[static_cast<std::size_t>(p)].second;
-        const std::vector<int> from_cluster = find_nearest_points(centroid_idx, top_k);
-        for (int idx : from_cluster) {
-            candidate_indices.push_back(static_cast<std::size_t>(idx));
-        }
+        probed[static_cast<std::size_t>(centroid_idx)] = 1;
     }
 
-    if (candidate_indices.empty()) {
+    const std::size_t k_cap = std::min(static_cast<std::size_t>(top_k), num_points);
+    if (k_cap == 0) {
         return QueryResult{};
     }
 
-    std::vector<std::pair<float, std::size_t>> scored;
-    scored.reserve(candidate_indices.size());
-    for (std::size_t idx : candidate_indices) {
-        scored.emplace_back(squared_l2(query.data(), pts_flat + idx * dimension_, dimension_), idx);
+    const int max_threads = omp_get_max_threads();
+    std::vector<utils::knn::TopKAccumulator> locals;
+    locals.reserve(static_cast<std::size_t>(max_threads));
+    for (int t = 0; t < max_threads; ++t) {
+        locals.emplace_back(k_cap);
     }
 
-    const std::size_t k_out = std::min(static_cast<std::size_t>(top_k), scored.size());
-    std::partial_sort(
-        scored.begin(), scored.begin() + static_cast<long>(k_out), scored.end(),
-        [](const std::pair<float, std::size_t> &a, const std::pair<float, std::size_t> &b) {
-            if (a.first != b.first) {
-                return a.first < b.first;
+#pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        utils::knn::TopKAccumulator &local =
+            locals[static_cast<std::size_t>(tid)];
+#pragma omp for schedule(static)
+        for (std::size_t idx = 0; idx < num_points; ++idx) {
+            const int centroid_idx = membership_[idx];
+            if (centroid_idx < 0 || centroid_idx >= num_clusters_) {
+                continue;
             }
-            return a.second < b.second;
-        });
+            if (!probed[static_cast<std::size_t>(centroid_idx)]) {
+                continue;
+            }
+            const float dist =
+                squared_l2(query.data(), pts_flat + idx * dimension_, dimension_);
+            local.maybe_push(dist, idx);
+        }
+    }
+
+    utils::knn::TopKAccumulator merged(k_cap);
+    for (const auto &local : locals) {
+        for (const auto &entry : local.entries_unsorted()) {
+            merged.maybe_push(entry.first, entry.second);
+        }
+    }
+
+    std::vector<std::pair<float, std::size_t>> scored = merged.extract_sorted();
+    if (scored.empty()) {
+        return QueryResult{};
+    }
 
     QueryResult result;
-    result.neighbors.reserve(k_out);
-    result.distances.reserve(k_out);
-    for (std::size_t i = 0; i < k_out; ++i) {
-        const std::size_t gidx = scored[i].second;
+    result.neighbors.reserve(scored.size());
+    result.distances.reserve(scored.size());
+    for (const auto &entry : scored) {
+        const std::size_t gidx = entry.second;
         TVector neighbor(dimension_);
         std::copy(pts_flat + gidx * dimension_, pts_flat + gidx * dimension_ + dimension_,
                   neighbor.begin());
         result.neighbors.push_back(std::move(neighbor));
-        result.distances.push_back(scored[i].first);
+        result.distances.push_back(entry.first);
     }
     return result;
-}
-
-std::vector<int> OpenMPKNNAlgorithm::find_nearest_points(int centroid_idx, int top_k) const {
-    (void)top_k;
-    std::vector<int> nearest_points_indices;
-    const std::size_t num_points = dataset_->n_points();
-    for (std::size_t i = 0; i < num_points; i++) {
-        if (membership_[i] == centroid_idx) {
-            nearest_points_indices.push_back(static_cast<int>(i));
-        }
-    }
-    return nearest_points_indices;
 }
 
 const char *OpenMPKNNAlgorithm::debug_root_dir() {

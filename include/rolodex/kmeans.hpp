@@ -50,7 +50,6 @@ class SerialKNNAlgorithm : public KNNAlgorithm {
     std::size_t dimension_;
     bool load_clusters_from_cache();
     void save_clusters_to_cache() const;
-    std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 };
 
 // ── OpenMP — unchanged interface ──────────────────────────────────────────────
@@ -73,7 +72,6 @@ class OpenMPKNNAlgorithm : public KNNAlgorithm {
     std::size_t dimension_;
 
     int find_nearest_centroid(const float *point) const;
-    std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
     bool ensure_debug_root_dir() const;
     std::string build_debug_snapshot_path(int iteration, bool is_final) const;
     void save_debug_snapshot(int iteration, bool is_final) const;
@@ -95,7 +93,6 @@ class MPIKMeans : public KNNAlgorithm {
 
     void update_centroids();
     int find_nearest_centroid(const float *point) const;
-    std::vector<int> find_nearest_points(int centroid_idx, int top_k) const;
 
   public:
     MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size);
