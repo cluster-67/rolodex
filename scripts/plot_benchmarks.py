@@ -221,11 +221,12 @@ def parse_log_metrics(log_file: Path) -> tuple[float | None, float | None]:
 
 def parse_stage_value(text: str, key: str, is_mpi: bool = False) -> float | None:
     if is_mpi:
-        m = re.search(rf"^rank=0\s+{key}={FLOAT_RE}", text, re.MULTILINE)
-        if m:
-            return float(m.group(1))
+        matches = re.findall(rf"^rank=(\d+)\s+{key}={FLOAT_RE}", text, re.MULTILINE)
+        if matches:
+            values = [float(v) for _, v in matches]
+            return sum(values) / len(values) if values else None
         return None
-    # For non-MPI: match key=value at line start, or after a newline (not prefixed by rank=)
+    # For non-MPI: match key=value at line start
     for m in re.finditer(rf"^{key}={FLOAT_RE}", text, re.MULTILINE):
         return float(m.group(1))
     return None
