@@ -68,8 +68,9 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     impl_opt->check(CLI::IsMember({"serial", "openmp", "mpi"}));
 
     app.add_option("--dataset", cfg.dataset_file, "Dataset name: fashion-mnist|gist|mnist|sift")
-        ->check(
-            CLI::IsMember({"fashion-mnist", "gist", "mnist", "sift", "deep1b-10M", "deep1b-1B"}))
+        ->check(CLI::IsMember({"fashion-mnist", "gist", "mnist", "sift", "deep1b-100", "deep1b-1K",
+                               "deep1b-10K", "deep1b-100K", "deep1b-1M", "deep1b-10M",
+                               "deep1b-100M", "deep1b-1B"}))
         ->default_val(cfg.dataset_file);
 
     app.add_option("-k,--num-clusters", cfg.num_clusters, "Number of k-means clusters")

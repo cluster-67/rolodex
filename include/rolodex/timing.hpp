@@ -69,7 +69,9 @@ QueryStageTimings *query_stage_sink();
 class QueryStageGuard {
   public:
     QueryStageGuard() : sink_(query_stage_sink()) {}
-    ~QueryStageGuard() { flush(); }
+    ~QueryStageGuard() {
+        flush();
+    }
     void flush() {
         if (sink_ != nullptr) {
             sink_->add(stage_);
@@ -77,6 +79,7 @@ class QueryStageGuard {
         }
     }
     QueryStageTimings stage_;
+
   private:
     QueryStageTimings *sink_;
 };

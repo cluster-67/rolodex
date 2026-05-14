@@ -100,16 +100,14 @@ void MPIKMeans::create_clusters(int update_frequency) {
             }
         }
         const auto membership_end = rolodex::timing::SteadyClock::now();
-        cluster_membership_ms_ +=
-            rolodex::timing::millis_between(membership_start, membership_end);
+        cluster_membership_ms_ += rolodex::timing::millis_between(membership_start, membership_end);
         cluster_membership_iters_++;
 
         int global_changes = 0;
         const auto comm_start = rolodex::timing::SteadyClock::now();
         MPI_Allreduce(&local_changes, &global_changes, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
         const auto comm_end = rolodex::timing::SteadyClock::now();
-        cluster_mpi_membership_comm_ms_ +=
-            rolodex::timing::millis_between(comm_start, comm_end);
+        cluster_mpi_membership_comm_ms_ += rolodex::timing::millis_between(comm_start, comm_end);
 
         if (rank_ == 0) {
             std::cout << "Iteration " << iters << " with " << global_changes
@@ -175,11 +173,16 @@ void MPIKMeans::update_centroids() {
 }
 
 void MPIKMeans::print_cluster_build_metrics(std::ostream &out) const {
-    out << "rank=" << rank_ << ' ' << "cluster_build_membership_ms=" << cluster_membership_ms_ << '\n';
-    out << "rank=" << rank_ << ' ' << "cluster_build_centroid_update_ms=" << cluster_centroid_update_ms_ << '\n';
-    out << "rank=" << rank_ << ' ' << "cluster_build_mpi_membership_comm_ms=" << cluster_mpi_membership_comm_ms_ << '\n';
-    out << "rank=" << rank_ << ' ' << "cluster_build_mpi_centroid_comm_ms=" << cluster_mpi_centroid_comm_ms_ << '\n';
-    out << "rank=" << rank_ << ' ' << "cluster_build_membership_iters=" << cluster_membership_iters_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_membership_ms=" << cluster_membership_ms_
+        << '\n';
+    out << "rank=" << rank_ << ' '
+        << "cluster_build_centroid_update_ms=" << cluster_centroid_update_ms_ << '\n';
+    out << "rank=" << rank_ << ' '
+        << "cluster_build_mpi_membership_comm_ms=" << cluster_mpi_membership_comm_ms_ << '\n';
+    out << "rank=" << rank_ << ' '
+        << "cluster_build_mpi_centroid_comm_ms=" << cluster_mpi_centroid_comm_ms_ << '\n';
+    out << "rank=" << rank_ << ' ' << "cluster_build_membership_iters=" << cluster_membership_iters_
+        << '\n';
 }
 
 int MPIKMeans::find_nearest_centroid(const float *point) const {
@@ -381,6 +384,7 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
         result.distances.push_back(merged[i].first);
     }
     const auto assemble_end = rolodex::timing::SteadyClock::now();
-    guard.stage_.result_assemble_ms += rolodex::timing::millis_between(assemble_start, assemble_end);
+    guard.stage_.result_assemble_ms +=
+        rolodex::timing::millis_between(assemble_start, assemble_end);
     return finish(std::move(result));
 }

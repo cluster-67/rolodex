@@ -34,11 +34,29 @@ std::string dataset_path_from_name(const std::string &dataset_name) {
     if (dataset_name == "sift") {
         return utils::path::dataset_path("sift-128-euclidean.hdf5");
     }
+    if (dataset_name == "deep1b-100") {
+        return utils::path::dataset_path("deep1b/deep1b-n100.hdf5");
+    }
+    if (dataset_name == "deep1b-1K") {
+        return utils::path::dataset_path("deep1b/deep1b-n1000.hdf5");
+    }
+    if (dataset_name == "deep1b-10K") {
+        return utils::path::dataset_path("deep1b/deep1b-n10000.hdf5");
+    }
+    if (dataset_name == "deep1b-100K") {
+        return utils::path::dataset_path("deep1b/deep1b-n100000.hdf5");
+    }
+    if (dataset_name == "deep1b-1M") {
+        return utils::path::dataset_path("deep1b/deep1b-n1000000.hdf5");
+    }
     if (dataset_name == "deep1b-10M") {
-        return utils::path::dataset_path("deep1b/deep1b-10M.hdf5");
+        return utils::path::dataset_path("deep1b/deep1b-n10000000.hdf5");
+    }
+    if (dataset_name == "deep1b-100M") {
+        return utils::path::dataset_path("deep1b/deep1b-n100000000.hdf5");
     }
     if (dataset_name == "deep1b-1B") {
-        return utils::path::dataset_path("deep1b/deep1b-1B.hdf5");
+        return utils::path::dataset_path("deep1b/deep1b-n1000000000.hdf5");
     }
     throw std::runtime_error("Invalid dataset '" + dataset_name +
                              "'. Expected one of: fashion-mnist, gist, mnist, sift.");

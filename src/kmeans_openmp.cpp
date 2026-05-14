@@ -86,8 +86,7 @@ void OpenMPKNNAlgorithm::create_clusters(int update_frequency) {
             }
         }
         const auto membership_end = rolodex::timing::SteadyClock::now();
-        cluster_membership_ms_ +=
-            rolodex::timing::millis_between(membership_start, membership_end);
+        cluster_membership_ms_ += rolodex::timing::millis_between(membership_start, membership_end);
         cluster_membership_iters_++;
 
         std::cout << "Iteration " << iters << " with " << membership_change_count
@@ -303,7 +302,8 @@ QueryResult OpenMPKNNAlgorithm::query_clusters(const TVector &query, int top_k, 
         result.distances.push_back(entry.first);
     }
     const auto assemble_end = rolodex::timing::SteadyClock::now();
-    guard.stage_.result_assemble_ms += rolodex::timing::millis_between(assemble_start, assemble_end);
+    guard.stage_.result_assemble_ms +=
+        rolodex::timing::millis_between(assemble_start, assemble_end);
     return finish(std::move(result));
 }
 
