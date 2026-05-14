@@ -105,17 +105,16 @@ def collect_records(logs_dir: Path) -> list[dict[str, float | int]]:
     return records
 
 
-def plot(records: list[dict[str, float | int]], output_path: Path) -> None:
-    df = pd.DataFrame(records).sort_values(["dataset", "threads", "nprobe"])
-    if df.empty:
-        raise ValueError("no records to plot")
+DATASET_ORDER = ["mnist", "fashion-mnist", "gist", "sift"]
 
-    sns.set_theme(style="ticks", context="talk", font_scale=1.05)
-    fig, ax_recall = plt.subplots(figsize=(10, 7))
+
+def _plot_dataset_ax(
+    ax_recall: plt.Axes, dataset_df: pd.DataFrame, dataset: str
+) -> None:
     ax_latency = ax_recall.twinx()
 
     grouped = (
-        df.groupby("nprobe", as_index=False)
+        dataset_df.groupby("nprobe", as_index=False)
         .agg(
             mean_recall=("mean_recall", "mean"),
             query_mean_ms=("query_mean_ms", "mean"),
@@ -128,72 +127,79 @@ def plot(records: list[dict[str, float | int]], output_path: Path) -> None:
     latency_values = grouped["query_mean_ms"].astype(float)
 
     recall_line = ax_recall.plot(
-        x_values,
-        recall_values,
-        marker="o",
-        linewidth=2.2,
-        color="#1f77b4",
+        x_values, recall_values, marker="o", linewidth=2.2, color="#1f77b4",
         label="Mean Recall",
     )[0]
     latency_line = ax_latency.plot(
-        x_values,
-        latency_values,
-        marker="s",
-        linewidth=2.2,
-        color="#d62728",
+        x_values, latency_values, marker="s", linewidth=2.2, color="#d62728",
         label="Query Mean Latency (ms)",
     )[0]
 
-    recall_k_values = sorted(df["top_k"].unique())
+    recall_k_values = sorted(dataset_df["top_k"].unique())
     recall_label = (
-        f"Mean Recall@{int(recall_k_values[0])}"
-        if len(recall_k_values) == 1
-        else "Mean Recall"
+        f"Recall@{int(recall_k_values[0])}" if len(recall_k_values) == 1 else "Recall"
     )
-    dataset_values = sorted(df["dataset"].unique())
-    thread_values = sorted(int(t) for t in df["threads"].unique())
-    if len(dataset_values) == 1 and len(thread_values) == 1:
-        title_suffix = f"{dataset_values[0]}, t={thread_values[0]}"
-    else:
-        title_suffix = "averaged over matched logs"
+    thread_values = sorted(int(t) for t in dataset_df["threads"].unique())
+    thread_str = f"t={thread_values[0]}" if len(thread_values) == 1 else "multi-thread"
+    k_values = sorted(int(k) for k in dataset_df["top_k"].unique())
+    k_str = f"k={k_values[0]}" if len(k_values) == 1 else "multi-k"
 
-    recall_min = float(recall_values.min())
-    recall_max = float(recall_values.max())
+    recall_min, recall_max = float(recall_values.min()), float(recall_values.max())
     recall_pad = max(0.015, (recall_max - recall_min) * 0.15)
     recall_low = max(0.0, recall_min - recall_pad)
     recall_high = min(1.02, recall_max + recall_pad)
     if recall_low >= recall_high:
-        recall_low = max(0.0, recall_min - 0.02)
-        recall_high = min(1.02, recall_max + 0.03)
+        recall_low, recall_high = max(0.0, recall_min - 0.02), min(1.02, recall_max + 0.03)
 
-    latency_min = float(latency_values.min())
-    latency_max = float(latency_values.max())
+    latency_min, latency_max = float(latency_values.min()), float(latency_values.max())
     latency_pad = max(0.08, (latency_max - latency_min) * 0.18)
     latency_low = max(0.0, latency_min - latency_pad)
     latency_high = latency_max + latency_pad
     if latency_low >= latency_high:
-        latency_low = max(0.0, latency_min - 0.05)
-        latency_high = latency_max + 0.1
+        latency_low, latency_high = max(0.0, latency_min - 0.05), latency_max + 0.1
 
-    ax_recall.set_title(
-        f"Nprobe Sweep: Recall and Query Latency ({title_suffix})", pad=18
-    )
+    ax_recall.set_title(f"{dataset} (OpenMP {thread_str}, {k_str})", pad=10)
     ax_recall.set_xlabel("nprobe")
     ax_recall.set_ylabel(recall_label, color=recall_line.get_color())
     ax_recall.tick_params(axis="y", labelcolor=recall_line.get_color())
     ax_recall.set_ylim(recall_low, recall_high)
+    ax_recall.set_xticks(x_values.tolist())
 
-    ax_latency.set_ylabel("Query Mean Latency (ms)", color=latency_line.get_color())
+    ax_latency.set_ylabel("Mean Latency (ms)", color=latency_line.get_color())
     ax_latency.tick_params(axis="y", labelcolor=latency_line.get_color())
     ax_latency.set_ylim(latency_low, latency_high)
 
-    ax_recall.set_xticks(x_values.tolist())
-    ax_recall.legend(handles=[recall_line, latency_line], loc="best")
-    # Keep only subtle major y-grid lines to reduce visual clutter.
+    ax_recall.legend(handles=[recall_line, latency_line], loc="best", fontsize="small")
     ax_recall.minorticks_off()
     ax_recall.grid(axis="y", which="major", linewidth=0.7, alpha=0.2)
     ax_recall.grid(axis="x", visible=False)
     ax_latency.grid(False)
+
+
+def plot(records: list[dict[str, float | int]], output_path: Path) -> None:
+    df = pd.DataFrame(records).sort_values(["dataset", "threads", "nprobe"])
+    if df.empty:
+        raise ValueError("no records to plot")
+
+    datasets_present = [d for d in DATASET_ORDER if d in df["dataset"].unique()]
+    extra = [d for d in df["dataset"].unique() if d not in DATASET_ORDER]
+    datasets_present += sorted(extra)
+
+    n = len(datasets_present)
+    ncols = n
+    nrows = 1
+
+    sns.set_theme(style="ticks", context="talk", font_scale=0.95)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 6))
+    axes_flat = axes if n > 1 else [axes]
+
+    for ax, dataset in zip(axes_flat, datasets_present):
+        _plot_dataset_ax(ax, df[df["dataset"] == dataset], dataset)
+
+    for ax in list(axes_flat)[n:]:  # no-op when ncols == n
+        ax.set_visible(False)
+
+    fig.suptitle("Nprobe Sweep: Recall vs Query Latency (OpenMP)", fontsize=15, y=1.01)
     sns.despine()
     fig.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
