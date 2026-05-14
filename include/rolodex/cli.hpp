@@ -29,6 +29,10 @@ struct RunConfig {
     bool debug_enabled;
     /** RNG seed for deterministic centroid init (`srand`); used by serial, OpenMP, and MPI. */
     unsigned int seed;
+    /** When true with impl mpi, each rank reads its own /train slice (requires mpi_size <= train
+     * rows).
+     */
+    bool partition_train = false;
 };
 
 /** Bootstrap: determine whether argv requests MPI, without full parsing. */

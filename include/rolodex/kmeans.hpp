@@ -113,8 +113,11 @@ class MPIKMeans : public KNNAlgorithm {
     double cluster_mpi_centroid_comm_ms_ = 0.0;
     std::size_t cluster_membership_iters_ = 0;
 
+    bool partition_train_ = false;
+
   public:
-    MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size);
+    MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size,
+              bool partition_train = false);
 
     void create_clusters(int update_frequency = 1) override;
     void print_cluster_build_metrics(std::ostream &out) const override;

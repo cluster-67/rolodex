@@ -22,12 +22,71 @@ void Dataset::load_dataset() {
     sp.getSimpleExtentDims(dims);
     nrows_ = static_cast<std::size_t>(dims[0]);
     ncols_ = static_cast<std::size_t>(dims[1]);
+    train_file_nrows_ = nrows_;
 
     // Read directly into the flat buffer — no scatter into TVector.
     data_.resize(nrows_ * ncols_);
     ds.read(data_.data(), H5::PredType::NATIVE_FLOAT);
 
     std::cout << "Loaded /train: " << nrows_ << " x " << ncols_ << " (flat buffer "
+              << data_.size() * sizeof(float) / (1 << 20) << " MiB)\n";
+}
+
+void Dataset::load_train_partition(int mpi_rank, int mpi_size) {
+    if (mpi_rank < 0 || mpi_size <= 0 || mpi_rank >= mpi_size) {
+        throw std::runtime_error("load_train_partition: invalid mpi_rank or mpi_size");
+    }
+
+    H5::H5File file(filename_, H5F_ACC_RDONLY);
+    H5::DataSet ds = file.openDataSet("/train");
+    H5::DataSpace filespace = ds.getSpace();
+
+    if (filespace.getSimpleExtentNdims() != 2) {
+        throw std::runtime_error("Expected /train to be rank-2");
+    }
+
+    hsize_t dims[2];
+    filespace.getSimpleExtentDims(dims);
+    const std::size_t N = static_cast<std::size_t>(dims[0]);
+    const std::size_t D = static_cast<std::size_t>(dims[1]);
+    train_file_nrows_ = N;
+    ncols_ = D;
+    points_cache_.clear();
+
+    if (static_cast<std::size_t>(mpi_size) > N) {
+        throw std::runtime_error(
+            "load_train_partition: mpi_size exceeds number of training points (each rank needs at "
+            "least one row)");
+    }
+
+    const long long nll = static_cast<long long>(N);
+    const long long pll = static_cast<long long>(mpi_size);
+    const long long rll = static_cast<long long>(mpi_rank);
+
+    std::size_t row_start = 0;
+    for (int r = 0; r < mpi_rank; ++r) {
+        const long long rl = static_cast<long long>(r);
+        row_start += static_cast<std::size_t>(nll / pll + (rl < nll % pll ? 1 : 0));
+    }
+    const std::size_t row_count = static_cast<std::size_t>(nll / pll + (rll < nll % pll ? 1 : 0));
+    nrows_ = row_count;
+
+    data_.resize(row_count * D);
+    if (row_count == 0) {
+        return;
+    }
+
+    hsize_t offset[2] = {static_cast<hsize_t>(row_start), 0};
+    hsize_t count[2] = {static_cast<hsize_t>(row_count), static_cast<hsize_t>(D)};
+    filespace.selectHyperslab(H5S_SELECT_SET, count, offset);
+
+    hsize_t mem_dims[2] = {static_cast<hsize_t>(row_count), static_cast<hsize_t>(D)};
+    H5::DataSpace memspace(2, mem_dims);
+
+    ds.read(data_.data(), H5::PredType::NATIVE_FLOAT, memspace, filespace);
+
+    std::cout << "Loaded /train partition: rank slice rows " << row_count << " x " << D
+              << " (global offset " << row_start << ", file rows " << N << ", flat buffer "
               << data_.size() * sizeof(float) / (1 << 20) << " MiB)\n";
 }
 
@@ -45,6 +104,34 @@ std::vector<TVector> &Dataset::get_points() {
 
 const std::string &Dataset::filename() const {
     return filename_;
+}
+
+TVector Dataset::read_train_row_global(std::size_t global_row) const {
+    H5::H5File file(filename_, H5F_ACC_RDONLY);
+    H5::DataSet train_dataset = file.openDataSet("/train");
+    H5::DataSpace dataspace = train_dataset.getSpace();
+    if (dataspace.getSimpleExtentNdims() != 2) {
+        throw std::runtime_error("Expected /train to be rank-2");
+    }
+    hsize_t dims[2];
+    dataspace.getSimpleExtentDims(dims);
+    const std::size_t nrows = static_cast<std::size_t>(dims[0]);
+    const std::size_t ncols = static_cast<std::size_t>(dims[1]);
+    if (global_row >= nrows) {
+        throw std::runtime_error("read_train_row_global: row index out of bounds for /train");
+    }
+
+    H5::DataSpace row_space = train_dataset.getSpace();
+    hsize_t offset[2] = {static_cast<hsize_t>(global_row), 0};
+    hsize_t count[2] = {1, dims[1]};
+    row_space.selectHyperslab(H5S_SELECT_SET, count, offset);
+
+    hsize_t mem_dims[2] = {1, dims[1]};
+    H5::DataSpace memspace(2, mem_dims);
+
+    TVector buffer(ncols);
+    train_dataset.read(buffer.data(), H5::PredType::NATIVE_FLOAT, memspace, row_space);
+    return buffer;
 }
 
 void Dataset::load_validation_dataset(int count) {

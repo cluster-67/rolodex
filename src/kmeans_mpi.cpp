@@ -9,19 +9,27 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
-MPIKMeans::MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size)
+MPIKMeans::MPIKMeans(Dataset *dataset, int num_clusters, bool cache_enabled, int rank, int size,
+                     bool partition_train)
     : KNNAlgorithm(dataset, num_clusters, cache_enabled), rank_(rank), size_(size), global_n_(0),
-      global_point_offset_(0), dimension_(0) {}
+      global_point_offset_(0), dimension_(0), partition_train_(partition_train) {}
 
 void MPIKMeans::create_clusters(int update_frequency) {
-    // Step 1: rank 0 reads the dataset and flattens it
+    // Step 1: rank 0 reads full dataset into flat_data, or partition mode: rank 0 reports N,D from
+    // file metadata.
     int N = 0, D = 0;
     std::vector<float> flat_data;
 
-    if (rank_ == 0) {
+    if (partition_train_) {
+        if (rank_ == 0) {
+            N = static_cast<int>(dataset_->train_file_nrows());
+            D = static_cast<int>(dataset_->dim());
+        }
+    } else if (rank_ == 0) {
         N = static_cast<int>(dataset_->n_points());
         D = static_cast<int>(dataset_->dim());
         flat_data.resize(static_cast<std::size_t>(N * D));
@@ -53,11 +61,22 @@ void MPIKMeans::create_clusters(int update_frequency) {
     // Step 2: rank 0 picks K random centroids from the full dataset (RNG seeded in main).
     std::vector<float> centroid_flat(static_cast<std::size_t>(num_clusters_ * D), 0.0f);
     if (rank_ == 0) {
-        for (int c = 0; c < num_clusters_; c++) {
-            const int idx = rand() % N;
-            for (int d = 0; d < D; d++) {
-                centroid_flat[static_cast<std::size_t>(c * D + d)] =
-                    flat_data[static_cast<std::size_t>(idx * D + d)];
+        if (partition_train_) {
+            for (int c = 0; c < num_clusters_; c++) {
+                const int idx = rand() % N;
+                const TVector row = dataset_->read_train_row_global(static_cast<std::size_t>(idx));
+                for (int d = 0; d < D; d++) {
+                    centroid_flat[static_cast<std::size_t>(c * D + d)] =
+                        row[static_cast<std::size_t>(d)];
+                }
+            }
+        } else {
+            for (int c = 0; c < num_clusters_; c++) {
+                const int idx = rand() % N;
+                for (int d = 0; d < D; d++) {
+                    centroid_flat[static_cast<std::size_t>(c * D + d)] =
+                        flat_data[static_cast<std::size_t>(idx * D + d)];
+                }
             }
         }
     }
@@ -75,10 +94,16 @@ void MPIKMeans::create_clusters(int update_frequency) {
     }
 
     const int local_n = counts[static_cast<std::size_t>(rank_)] / D;
-    local_points_flat_.assign(static_cast<std::size_t>(local_n * D), 0.0f);
+    if (partition_train_) {
+        local_points_flat_.assign(dataset_->get_flat(),
+                                  dataset_->get_flat() + static_cast<std::size_t>(local_n) *
+                                                             static_cast<std::size_t>(D));
+    } else {
+        local_points_flat_.assign(static_cast<std::size_t>(local_n * D), 0.0f);
 
-    MPI_Scatterv(flat_data.data(), counts.data(), displs.data(), MPI_FLOAT,
-                 local_points_flat_.data(), local_n * D, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Scatterv(flat_data.data(), counts.data(), displs.data(), MPI_FLOAT,
+                     local_points_flat_.data(), local_n * D, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    }
 
     flat_centroids_.assign(centroid_flat.begin(), centroid_flat.end());
 
@@ -340,6 +365,44 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     MPI_Gatherv(send_g.data(), local_count, MPI_INT, rank_ == 0 ? allg.data() : nullptr,
                 rank_ == 0 ? recvcounts.data() : nullptr, rank_ == 0 ? displs.data() : nullptr,
                 MPI_INT, 0, MPI_COMM_WORLD);
+
+    std::vector<float> send_vecs;
+    std::vector<int> recvcounts_f;
+    std::vector<int> displs_f;
+    std::vector<float> allvec;
+    if (partition_train_) {
+        send_vecs.resize(static_cast<std::size_t>(local_count) * static_cast<std::size_t>(dim));
+        for (int i = 0; i < local_count; ++i) {
+            const int gix = send_g[static_cast<std::size_t>(i)];
+            const std::size_t liu =
+                static_cast<std::size_t>(gix) - static_cast<std::size_t>(global_point_offset_);
+            std::copy(local_points_flat_.begin() +
+                          static_cast<std::ptrdiff_t>(liu) * static_cast<std::ptrdiff_t>(dim),
+                      local_points_flat_.begin() +
+                          static_cast<std::ptrdiff_t>(liu + 1) * static_cast<std::ptrdiff_t>(dim),
+                      send_vecs.begin() +
+                          static_cast<std::ptrdiff_t>(i) * static_cast<std::ptrdiff_t>(dim));
+        }
+        if (rank_ == 0) {
+            recvcounts_f.resize(static_cast<std::size_t>(size_));
+            displs_f.resize(static_cast<std::size_t>(size_));
+            int totf = 0;
+            for (int r = 0; r < size_; ++r) {
+                displs_f[static_cast<std::size_t>(r)] = totf;
+                recvcounts_f[static_cast<std::size_t>(r)] =
+                    recvcounts[static_cast<std::size_t>(r)] * dim;
+                totf += recvcounts_f[static_cast<std::size_t>(r)];
+            }
+            if (totf > 0) {
+                allvec.resize(static_cast<std::size_t>(totf));
+            }
+        }
+        MPI_Gatherv(send_vecs.data(), local_count * dim, MPI_FLOAT,
+                    rank_ == 0 ? allvec.data() : nullptr,
+                    rank_ == 0 ? recvcounts_f.data() : nullptr,
+                    rank_ == 0 ? displs_f.data() : nullptr, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    }
+
     const auto gather_end = rolodex::timing::SteadyClock::now();
     guard.stage_.mpi_gather_ms += rolodex::timing::millis_between(gather_start, gather_end);
 
@@ -366,22 +429,54 @@ QueryResult MPIKMeans::query_clusters(const TVector &query, int top_k, int nprob
     const auto merge_end = rolodex::timing::SteadyClock::now();
     guard.stage_.mpi_merge_ms += rolodex::timing::millis_between(merge_start, merge_end);
 
-    const float *pts_flat = dataset_->get_flat();
-    const std::size_t num_points = dataset_->n_points();
     const auto assemble_start = rolodex::timing::SteadyClock::now();
     result.neighbors.reserve(k_out);
     result.distances.reserve(k_out);
-    for (std::size_t i = 0; i < k_out; ++i) {
-        const std::size_t gix = merged[i].second;
-        if (gix >= num_points) {
-            continue;
+    if (partition_train_) {
+        std::unordered_map<std::size_t, TVector> vec_by_gix;
+        vec_by_gix.reserve(static_cast<std::size_t>(total_recv));
+        for (int r = 0; r < size_; ++r) {
+            const int rc = recvcounts[static_cast<std::size_t>(r)];
+            const int pd = displs[static_cast<std::size_t>(r)];
+            const int vo = displs_f[static_cast<std::size_t>(r)];
+            for (int i = 0; i < rc; ++i) {
+                const std::size_t gix =
+                    static_cast<std::size_t>(allg[static_cast<std::size_t>(pd + i)]);
+                TVector neighbor(static_cast<std::size_t>(dim));
+                std::copy(allvec.begin() + static_cast<std::ptrdiff_t>(vo + i * dim),
+                          allvec.begin() + static_cast<std::ptrdiff_t>(vo + (i + 1) * dim),
+                          neighbor.begin());
+                vec_by_gix[gix] = std::move(neighbor);
+            }
         }
-        TVector neighbor(static_cast<std::size_t>(dim));
-        std::copy(pts_flat + gix * static_cast<std::size_t>(dim),
-                  pts_flat + gix * static_cast<std::size_t>(dim) + static_cast<std::size_t>(dim),
-                  neighbor.begin());
-        result.neighbors.push_back(std::move(neighbor));
-        result.distances.push_back(merged[i].first);
+        for (std::size_t i = 0; i < k_out; ++i) {
+            const std::size_t gix = merged[i].second;
+            if (gix >= static_cast<std::size_t>(global_n_)) {
+                continue;
+            }
+            const auto it = vec_by_gix.find(gix);
+            if (it == vec_by_gix.end()) {
+                continue;
+            }
+            result.neighbors.push_back(it->second);
+            result.distances.push_back(merged[i].first);
+        }
+    } else {
+        const float *pts_flat = dataset_->get_flat();
+        const std::size_t num_points = dataset_->n_points();
+        for (std::size_t i = 0; i < k_out; ++i) {
+            const std::size_t gix = merged[i].second;
+            if (gix >= num_points) {
+                continue;
+            }
+            TVector neighbor(static_cast<std::size_t>(dim));
+            std::copy(pts_flat + gix * static_cast<std::size_t>(dim),
+                      pts_flat + gix * static_cast<std::size_t>(dim) +
+                          static_cast<std::size_t>(dim),
+                      neighbor.begin());
+            result.neighbors.push_back(std::move(neighbor));
+            result.distances.push_back(merged[i].first);
+        }
     }
     const auto assemble_end = rolodex::timing::SteadyClock::now();
     guard.stage_.result_assemble_ms +=

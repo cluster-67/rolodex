@@ -49,7 +49,20 @@ class Dataset {
     explicit Dataset(std::string filename);
 
     void load_dataset();
+    /** Load contiguous /train rows for MPI rank `mpi_rank` of `mpi_size` (same layout as
+     * MPI_Scatterv). Requires `mpi_size` <= global train row count. Sets `train_file_nrows_` to
+     * full file N. */
+    void load_train_partition(int mpi_rank, int mpi_size);
     void load_validation_dataset(int count = -1);
+
+    /** Global /train row count from file (equals `n_points()` after full `load_dataset()`). */
+    std::size_t train_file_nrows() const {
+        return train_file_nrows_;
+    }
+
+    /** Read one /train row by global index (HDF5); for centroid init when the full train matrix is
+     * not in memory. */
+    TVector read_train_row_global(std::size_t global_row) const;
 
     const std::string &filename() const;
     const std::vector<ValidationPoint> &get_validation_points() const;
@@ -76,6 +89,8 @@ class Dataset {
     TAlignedVector data_; // flat row-major primary storage
     std::size_t nrows_ = 0;
     std::size_t ncols_ = 0;
+    /** Global row count of /train in the file (set on train loads). */
+    std::size_t train_file_nrows_ = 0;
     std::vector<TVector> points_cache_; // populated on demand by get_points()
     std::vector<ValidationPoint> validation_points_;
     std::vector<TVector> read_train_rows(H5::DataSet *train_dataset, const std::vector<int> &rows);

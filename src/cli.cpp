@@ -59,6 +59,7 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     cfg.vector_match_eps = 1e-4f;
     cfg.debug_enabled = false;
     cfg.seed = 42U;
+    cfg.partition_train = false;
 
     CLI::App app{"rolodex knn"};
 
@@ -92,6 +93,10 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
         ->default_val(cfg.vector_match_eps);
     app.add_flag("--debug", cfg.debug_enabled,
                  "Enable OpenMP debug snapshots (HDF5) under data/debug");
+    app.add_flag(
+        "--partition", cfg.partition_train,
+        "MPI only: each rank reads its own /train partition (no Scatterv); requires mpi_size <= "
+        "number of training points");
 
     try {
         app.parse(argc, argv);
@@ -103,6 +108,10 @@ ParseResult parse_args(int argc, char **argv, RunConfig &out) {
     }
 
     cfg.implementation = parse_impl_string(impl_str);
+
+    if (cfg.partition_train && cfg.implementation != RunImplementation::MPI) {
+        throw std::runtime_error("--partition requires impl mpi");
+    }
 
     if (cfg.num_clusters <= 0 || cfg.top_k <= 0 || cfg.nprobe <= 0) {
         throw std::runtime_error("RunConfig: num_clusters, top_k, and nprobe must be positive");

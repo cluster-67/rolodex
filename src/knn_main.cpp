@@ -171,7 +171,16 @@ int main(int argc, char **argv) {
 
     const std::string dataset_file = dataset_path_from_name(cfg.dataset_file);
     Dataset dataset(dataset_file);
-    if (!mpi.enabled || mpi.rank == 0) {
+    if (mpi.enabled && cfg.implementation == rolodex::cli::RunImplementation::MPI &&
+        cfg.partition_train) {
+        const auto dataset_load_start = rolodex::timing::SteadyClock::now();
+        dataset.load_train_partition(mpi.rank, mpi.size);
+        const double dataset_load_ms = rolodex::timing::millis_between(
+            dataset_load_start, rolodex::timing::SteadyClock::now());
+        if (mpi.rank == 0) {
+            std::cout << "train_dataset_load_time_ms=" << dataset_load_ms << '\n';
+        }
+    } else if (!mpi.enabled || mpi.rank == 0) {
         const auto dataset_load_start = rolodex::timing::SteadyClock::now();
 
         dataset.load_dataset();
@@ -191,8 +200,8 @@ int main(int argc, char **argv) {
                                                    cfg.debug_enabled));
         break;
     case rolodex::cli::RunImplementation::MPI:
-        knn_algorithm.reset(
-            new MPIKMeans(&dataset, cfg.num_clusters, cfg.cache_enabled, mpi.rank, mpi.size));
+        knn_algorithm.reset(new MPIKMeans(&dataset, cfg.num_clusters, cfg.cache_enabled, mpi.rank,
+                                          mpi.size, cfg.partition_train));
         break;
     }
 
